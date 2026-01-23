@@ -23,51 +23,13 @@ const collections = [
   'chat_messages',
   'payments',
   'contacts',
-  'admin_approval_log'
+  'admin_approval_log',
+  'sys_cat',
+  'sub_plan',
+  'admin'
 ];
 
-async function createSystemCategory(db) {
-  const categories = [
-    {
-      id: 'admin',
-      name: 'Admin',
-      description: 'Admin category',
-      pic: 'admin.png'
-    },
-    {
-      id: 'proposal',
-      name: 'Proposal',
-      description: 'Proposal category',
-      pic: 'proposal.png'
-    },
-    {
-      id: 'services',
-      name: 'Services',
-      description: 'Services category',
-      pic: 'services.png'
-    },
-    {
-      id: 'product',
-      name: 'Product',
-      description: 'Product category',
-      pic: 'product.png'
-    }
-  ];
-  await db.collection('system_category').deleteMany({}); // Clear if exists
-  await db.collection('system_category').insertMany(categories);
-  console.log('system_category collection created and seeded!');
-}
-
-async function createSubPlanCollection(db) {
-  const subPlans = [
-    { id: 1, typename: 'Basic', days: 30, price: 1000 },
-    { id: 2, typename: 'Standard', days: 90, price: 2500 },
-    { id: 3, typename: 'Premium', days: 365, price: 8000 }
-  ];
-  await db.collection('sub_plan').deleteMany({});
-  await db.collection('sub_plan').insertMany(subPlans);
-  console.log('sub_plan collection created and seeded!');
-}
+ 
 
 async function createVendorCollection(db) {
   const vendors = [
@@ -116,6 +78,132 @@ async function createAdminCollection(db) {
   await db.collection('admin').deleteMany({}); // Clear if exists
   await db.collection('admin').insertOne(admin);
   console.log('admin collection created and seeded!');
+}
+
+async function createSystemCategory(db) {
+  const categories = [
+    {
+      type: 'Wedding Photography',
+      description: 'Professional wedding photography services',
+      profilePic: 'https://example.com/wedding-photo.jpg',
+      key: 'wedding_photo',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      type: 'Wedding Album',
+      description: 'Digital and printed wedding album services',
+      profilePic: 'https://example.com/album.jpg',
+      key: 'wedding_album',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      type: 'Wedding Venue',
+      description: 'Wedding venue booking services',
+      profilePic: 'https://example.com/venue.jpg',
+      key: 'wedding_venue',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      type: 'Catering',
+      description: 'Wedding catering and food services',
+      profilePic: 'https://example.com/catering.jpg',
+      key: 'catering',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      type: 'Decoration',
+      description: 'Wedding decoration and arrangement services',
+      profilePic: 'https://example.com/decoration.jpg',
+      key: 'decoration',
+      status: 'active',
+      createdAt: new Date()
+    }
+  ];
+  await db.collection('sys_cat').deleteMany({});
+  await db.collection('sys_cat').insertMany(categories);
+  console.log('sys_cat collection created and seeded!');
+}
+
+async function createSubPlanCollection(db) {
+  const plans = [
+    {
+      name: 'Basic Service',
+      price: 5000,
+      duration: 30,
+      features: ['5 Listings', 'Basic Support', 'Standard Visibility'],
+      vendorType: 'service',
+      description: 'Perfect for getting started',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      name: 'Standard Service',
+      price: 10000,
+      duration: 30,
+      features: ['15 Listings', 'Priority Support', 'Enhanced Visibility', 'Analytics Dashboard'],
+      vendorType: 'service',
+      description: 'Great for growing businesses',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      name: 'Premium Service',
+      price: 25000,
+      duration: 30,
+      features: ['Unlimited Listings', '24/7 Support', 'Top Visibility', 'Advanced Analytics', 'Featured Badge'],
+      vendorType: 'service',
+      description: 'For established vendors',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      name: 'Basic Album',
+      price: 3000,
+      duration: 30,
+      features: ['3 Albums', 'Basic Templates', 'Standard Support'],
+      vendorType: 'album',
+      description: 'Start your album portfolio',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      name: 'Pro Album',
+      price: 8000,
+      duration: 30,
+      features: ['10 Albums', 'Premium Templates', 'Custom Design', 'Priority Support'],
+      vendorType: 'album',
+      description: 'Professional album services',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      name: 'Basic Product',
+      price: 4000,
+      duration: 30,
+      features: ['10 Products', 'Basic Shop', 'Standard Support'],
+      vendorType: 'product',
+      description: 'Start selling products',
+      status: 'active',
+      createdAt: new Date()
+    },
+    {
+      name: 'Premium Product',
+      price: 12000,
+      duration: 30,
+      features: ['Unlimited Products', 'Advanced Shop', 'Marketing Tools', 'Analytics'],
+      vendorType: 'product',
+      description: 'Full-featured product selling',
+      status: 'active',
+      createdAt: new Date()
+    }
+  ];
+  await db.collection('sub_plan').deleteMany({});
+  await db.collection('sub_plan').insertMany(plans);
+  console.log('sub_plan collection created and seeded!');
 }
 
 

@@ -1,6 +1,7 @@
 
 const express = require('express');
 const { getDb } = require('../db/mongo');
+const { ObjectId } = require('mongodb');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
@@ -179,6 +180,97 @@ router.post('/login', async (req, res) => {
       email: admin.email
     }
   });
+});
+
+// ===== SYSTEM CATEGORY ROUTES (sys_cat) =====
+
+// Create system category
+router.post('/categories', async (req, res) => {
+  const db = getDb();
+  const { type, description, profilePic, key } = req.body;
+  
+  if (!type || !description) {
+    return res.status(400).json({ error: 'type and description are required' });
+  }
+  
+  const category = {
+    type,
+    description,
+    profilePic: profilePic || null,
+    key: key || null,
+    createdAt: new Date(),
+    status: 'active'
+  };
+  
+  const result = await db.collection('sys_cat').insertOne(category);
+  res.status(201).json({ 
+    message: 'Category created successfully',
+    category: { ...category, _id: result.insertedId }
+  });
+});
+
+// Get all categories
+router.get('/categories', async (req, res) => {
+  const db = getDb();
+  const categories = await db.collection('sys_cat').find().toArray();
+  res.json({ categories });
+});
+
+// Get single category by ID
+router.get('/categories/:id', async (req, res) => {
+  const db = getDb();
+  try {
+    const category = await db.collection('sys_cat').findOne({ _id: new ObjectId(req.params.id) });
+    if (!category) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    res.json(category);
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid ID format' });
+  }
+});
+
+// Update category
+router.put('/categories/:id', async (req, res) => {
+  const db = getDb();
+  const { type, description, profilePic, key, status } = req.body;
+  
+  try {
+    const updateData = {};
+    if (type) updateData.type = type;
+    if (description) updateData.description = description;
+    if (profilePic !== undefined) updateData.profilePic = profilePic;
+    if (key !== undefined) updateData.key = key;
+    if (status) updateData.status = status;
+    updateData.updatedAt = new Date();
+    
+    const result = await db.collection('sys_cat').updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: updateData }
+    );
+    
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    
+    res.json({ message: 'Category updated successfully', modifiedCount: result.modifiedCount });
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid ID format' });
+  }
+});
+
+// Delete category
+router.delete('/categories/:id', async (req, res) => {
+  const db = getDb();
+  try {
+    const result = await db.collection('sys_cat').deleteOne({ _id: new ObjectId(req.params.id) });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+    res.json({ message: 'Category deleted successfully', deletedCount: result.deletedCount });
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid ID format' });
+  }
 });
 
 module.exports = router;
