@@ -35,19 +35,63 @@ router.get('/', async (req, res) => {
 // Create service
 router.post('/', async (req, res) => {
   const db = getDb();
-  const { name, image, category } = req.body;
-  
+  const { name, image, category, description } = req.body;
   const result = await db.collection('services').insertOne({
     name,
     image,
     category,
+    description,
     created_at: new Date()
   });
-  
   res.status(201).json({ 
     message: 'Service created successfully',
     serviceId: result.insertedId 
   });
+});
+// Get single service by id
+router.get('/:id', async (req, res) => {
+  const db = getDb();
+  try {
+    const service = await db.collection('services').findOne({ _id: new ObjectId(req.params.id) });
+    if (!service) return res.status(404).json({ error: 'Service not found' });
+    res.json({ service });
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid ID format' });
+  }
+});
+
+// Update service
+router.put('/:id', async (req, res) => {
+  const db = getDb();
+  const { name, image, category, description } = req.body;
+  try {
+    const update = {};
+    if (name) update.name = name;
+    if (image) update.image = image;
+    if (category) update.category = category;
+    if (description) update.description = description;
+    update.updated_at = new Date();
+    const result = await db.collection('services').updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: update }
+    );
+    if (result.matchedCount === 0) return res.status(404).json({ error: 'Service not found' });
+    res.json({ message: 'Service updated successfully' });
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid ID format' });
+  }
+});
+
+// Delete service
+router.delete('/:id', async (req, res) => {
+  const db = getDb();
+  try {
+    const result = await db.collection('services').deleteOne({ _id: new ObjectId(req.params.id) });
+    if (result.deletedCount === 0) return res.status(404).json({ error: 'Service not found' });
+    res.json({ message: 'Service deleted successfully' });
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid ID format' });
+  }
 });
 
 // Get vendor services

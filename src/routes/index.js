@@ -13,6 +13,8 @@ const contactRoutes = require('./contact');
 const adminRoutes = require('./admin');
 const subPlanRoutes = require('./sub_plan');
 const paymentSystemRoutes = require('./payment_system');
+const uploadRoutes = require('./upload');
+const subscriptionRoutes = require('./subscription');
 
 // Health check
 router.get('/', (req, res) => res.json({ 
@@ -35,16 +37,11 @@ router.get('/test-db', async (req, res) => {
 
 // Mount all routes
 
-router.use('/auth', authRoutes);
-router.use('/vendor', vendorRoutes);
-router.use('/products', productsRoutes);
-router.use('/albums', albumsRoutes);
-router.use('/services', servicesRoutes);
-router.use('/sub_plan', subPlanRoutes);
-router.use('/payment_system', paymentSystemRoutes);
-router.use('/chat', chatRoutes);
-router.use('/payment', paymentRoutes);
-router.use('/contact', contactRoutes);
+
+// Mount admin routes at /admin
 router.use('/admin', adminRoutes);
+router.use('/sub_plan', subPlanRoutes);
+router.use('/upload', uploadRoutes);
+router.use('/', subscriptionRoutes);
 
 module.exports = router;

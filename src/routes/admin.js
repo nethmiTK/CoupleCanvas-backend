@@ -1,15 +1,47 @@
-
 const express = require('express');
 const { getDb } = require('../db/mongo');
 const { ObjectId } = require('mongodb');
+const router = express.Router();
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const router = express.Router();
-
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
 
-// Admin signup
+// Get all admins
+router.get('/all', async (req, res) => {
+  const db = getDb();
+  const admins = await db.collection('admin').find().toArray();
+  res.json({ admins });
+});
 
+// ...existing code...
+
+// (Move this route to the end of the file)
+
+// ...existing code...
+
+// Update admin
+router.put('/:id', async (req, res) => {
+  const db = getDb();
+  const { name, email, status, role } = req.body;
+  const update = {};
+  if (name) update.name = name;
+  if (email) update.email = email;
+  if (status) update.status = status;
+  if (role) update.role = role;
+  const result = await db.collection('admin').updateOne({ _id: new ObjectId(req.params.id) }, { $set: update });
+  if (result.matchedCount === 0) return res.status(404).json({ error: 'Admin not found' });
+  res.json({ message: 'Admin updated' });
+});
+
+// Delete admin
+router.delete('/:id', async (req, res) => {
+  const db = getDb();
+  const result = await db.collection('admin').deleteOne({ _id: new ObjectId(req.params.id) });
+  if (result.deletedCount === 0) return res.status(404).json({ error: 'Admin not found' });
+  res.json({ message: 'Admin deleted' });
+});
+
+// Admin signup
 router.post('/signup', async (req, res) => {
   const db = getDb();
   const { name, email, password } = req.body;
@@ -103,40 +135,45 @@ router.post('/approve', async (req, res) => {
 
 // Get statistics
 router.get('/stats', async (req, res) => {
-  const db = getDb();
-  
-  const [
-    albumsCount,
-    servicesCount,
-    productsCount,
-    proposalsCount,
-    usersCount,
-    vendorsCount,
-    customersCount,
-    pendingVendorsCount
-  ] = await Promise.all([
-    db.collection('albums').countDocuments(),
-    db.collection('services').countDocuments(),
-    db.collection('vendor_products').countDocuments(),
-    db.collection('vendor_proposal').countDocuments(),
-    db.collection('users').countDocuments(),
-    db.collection('vendor_profiles').countDocuments(),
-    db.collection('customers').countDocuments(),
-    db.collection('vendor_profiles').countDocuments({ approval_status: 'pending' })
-  ]);
-  
-  res.json({
-    stats: {
-      albums: albumsCount,
-      services: servicesCount,
-      products: productsCount,
-      proposals: proposalsCount,
-      users: usersCount,
-      vendors: vendorsCount,
-      customers: customersCount,
-      pendingVendors: pendingVendorsCount
-    }
-  });
+  try {
+    const db = getDb();
+
+    const [
+      albumsCount,
+      servicesCount,
+      productsCount,
+      proposalsCount,
+      usersCount,
+      vendorsCount,
+      customersCount,
+      pendingVendorsCount
+    ] = await Promise.all([
+      db.collection('albums').countDocuments(),
+      db.collection('services').countDocuments(),
+      db.collection('vendor_products').countDocuments(),
+      db.collection('vendor_proposal').countDocuments(),
+      db.collection('users').countDocuments(),
+      db.collection('vendor_profiles').countDocuments(),
+      db.collection('customers').countDocuments(),
+      db.collection('vendor_profiles').countDocuments({ approval_status: 'pending' })
+    ]);
+
+    res.json({
+      stats: {
+        albums: albumsCount,
+        services: servicesCount,
+        products: productsCount,
+        proposals: proposalsCount,
+        users: usersCount,
+        vendors: vendorsCount,
+        customers: customersCount,
+        pendingVendors: pendingVendorsCount
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching admin stats:', err);
+    res.status(500).json({ error: 'Failed to fetch admin stats', details: err.message });
+  }
 });
 
 // Cleanup expired profiles
@@ -182,47 +219,54 @@ router.post('/login', async (req, res) => {
   });
 });
 
-// ===== SYSTEM CATEGORY ROUTES (sys_cat) =====
 
-// Create system category
-router.post('/categories', async (req, res) => {
-  const db = getDb();
-  const { type, description, profilePic, key } = req.body;
-  
-  if (!type || !description) {
-    return res.status(400).json({ error: 'type and description are required' });
+// ===== SERVICE CATEGORIES ROUTES =====
+
+// Create service category
+router.post('/service-categories', async (req, res) => {
+  try {
+    const db = getDb();
+    const { name, description, imageUrl, status } = req.body;
+    if (!name || !description) {
+      return res.status(400).json({ error: 'name and description are required' });
+    }
+    const category = {
+      name,
+      description,
+      imageUrl: imageUrl || '',
+      status: status || 'active',
+      createdAt: new Date()
+    };
+    const result = await db.collection('service_categories').insertOne(category);
+    res.status(201).json({
+      message: 'Service category created successfully',
+      category: { ...category, _id: result.insertedId }
+    });
+  } catch (err) {
+    console.error('Error creating service category:', err);
+    res.status(500).json({ error: 'Failed to create service category', details: err.message });
   }
-  
-  const category = {
-    type,
-    description,
-    profilePic: profilePic || null,
-    key: key || null,
-    createdAt: new Date(),
-    status: 'active'
-  };
-  
-  const result = await db.collection('sys_cat').insertOne(category);
-  res.status(201).json({ 
-    message: 'Category created successfully',
-    category: { ...category, _id: result.insertedId }
-  });
 });
 
-// Get all categories
-router.get('/categories', async (req, res) => {
-  const db = getDb();
-  const categories = await db.collection('sys_cat').find().toArray();
-  res.json({ categories });
+// Get all service categories
+router.get('/service-categories', async (req, res) => {
+  try {
+    const db = getDb();
+    const categories = await db.collection('service_categories').find().toArray();
+    res.json({ categories });
+  } catch (err) {
+    console.error('Error fetching service categories:', err);
+    res.status(500).json({ error: 'Failed to fetch service categories', details: err.message });
+  }
 });
 
-// Get single category by ID
-router.get('/categories/:id', async (req, res) => {
+// Get single service category by ID
+router.get('/service-categories/:id', async (req, res) => {
   const db = getDb();
   try {
-    const category = await db.collection('sys_cat').findOne({ _id: new ObjectId(req.params.id) });
+    const category = await db.collection('service_categories').findOne({ _id: new ObjectId(req.params.id) });
     if (!category) {
-      return res.status(404).json({ error: 'Category not found' });
+      return res.status(404).json({ error: 'Service category not found' });
     }
     res.json(category);
   } catch (err) {
@@ -230,47 +274,50 @@ router.get('/categories/:id', async (req, res) => {
   }
 });
 
-// Update category
-router.put('/categories/:id', async (req, res) => {
+// Update service category
+router.put('/service-categories/:id', async (req, res) => {
   const db = getDb();
-  const { type, description, profilePic, key, status } = req.body;
-  
+  const { name, description, imageUrl, status } = req.body;
   try {
     const updateData = {};
-    if (type) updateData.type = type;
+    if (name) updateData.name = name;
     if (description) updateData.description = description;
-    if (profilePic !== undefined) updateData.profilePic = profilePic;
-    if (key !== undefined) updateData.key = key;
+    if (imageUrl !== undefined) updateData.imageUrl = imageUrl;
     if (status) updateData.status = status;
     updateData.updatedAt = new Date();
-    
-    const result = await db.collection('sys_cat').updateOne(
+    const result = await db.collection('service_categories').updateOne(
       { _id: new ObjectId(req.params.id) },
       { $set: updateData }
     );
-    
     if (result.matchedCount === 0) {
-      return res.status(404).json({ error: 'Category not found' });
+      return res.status(404).json({ error: 'Service category not found' });
     }
-    
-    res.json({ message: 'Category updated successfully', modifiedCount: result.modifiedCount });
+    res.json({ message: 'Service category updated successfully', modifiedCount: result.modifiedCount });
   } catch (err) {
     res.status(400).json({ error: 'Invalid ID format' });
   }
 });
 
-// Delete category
-router.delete('/categories/:id', async (req, res) => {
+// Delete service category
+router.delete('/service-categories/:id', async (req, res) => {
   const db = getDb();
   try {
-    const result = await db.collection('sys_cat').deleteOne({ _id: new ObjectId(req.params.id) });
+    const result = await db.collection('service_categories').deleteOne({ _id: new ObjectId(req.params.id) });
     if (result.deletedCount === 0) {
-      return res.status(404).json({ error: 'Category not found' });
+      return res.status(404).json({ error: 'Service category not found' });
     }
-    res.json({ message: 'Category deleted successfully', deletedCount: result.deletedCount });
+    res.json({ message: 'Service category deleted successfully', deletedCount: result.deletedCount });
   } catch (err) {
     res.status(400).json({ error: 'Invalid ID format' });
   }
+});
+
+// Get single admin by id (MOVED TO END to avoid route conflicts)
+router.get('/:id', async (req, res) => {
+  const db = getDb();
+  const admin = await db.collection('admin').findOne({ _id: new ObjectId(req.params.id) });
+  if (!admin) return res.status(404).json({ error: 'Admin not found' });
+  res.json({ admin });
 });
 
 module.exports = router;
