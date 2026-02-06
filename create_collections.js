@@ -38,6 +38,7 @@ const bcrypt = require('bcrypt');
 const uri = process.env.MONGODB_URI;
 const dbName = process.env.MONGODB_DB_NAME;
 
+
 const collections = [
   'users',
   'customers',
@@ -64,8 +65,128 @@ const collections = [
   'service_vendors',
   'product_vendors',
   'proposal_vendors',
-  'vendor_services'
+  'vendor_services',
+  'template_categories',
+  'album_templates',
+  'template_pages',
+  'album_pages'
+  , 'template_extra_layout_sequence'
+  , 'uploads'
+  , 'album_page_slots'
 ];
+
+// --- Album Template System Collections ---
+async function createTemplateCategories(db) {
+  const categories = [
+    {
+      name: "Wedding",
+      description: "Wedding albums",
+      status: "active",
+      createdAt: new Date()
+    },
+    {
+      name: "Birthday",
+      description: "Birthday albums",
+      status: "active",
+      createdAt: new Date()
+    }
+  ];
+  await db.collection('template_categories').deleteMany({});
+  await db.collection('template_categories').insertMany(categories);
+  console.log('template_categories collection created and seeded!');
+}
+
+async function createAlbumTemplates(db) {
+  const category = await db.collection('template_categories').findOne({});
+  const templates = [
+    {
+      name: "Royal Wedding Album",
+      categoryId: category ? category._id : null,
+      pagesCount: 20,
+      coverType: "Hard Cover",
+      size: "12x12",
+      description: "Premium wedding template",
+      previewImage: "uploads/template1.jpg",
+      status: "active",
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+  ];
+  await db.collection('album_templates').deleteMany({});
+  await db.collection('album_templates').insertMany(templates);
+  console.log('album_templates collection created and seeded!');
+}
+
+async function createTemplatePages(db) {
+  const template = await db.collection('album_templates').findOne({});
+  const pages = [
+    {
+      templateId: template ? template._id : null,
+      pageNumber: 1,
+      isCover: true,
+      layoutJson: {
+        elements: [
+          { type: "image", x: 100, y: 100, w: 500, h: 400 },
+          { type: "text", text: "Wedding Day" }
+        ]
+      },
+      createdAt: new Date()
+    },
+    {
+      templateId: template ? template._id : null,
+      pageNumber: 2,
+      isCover: false,
+      layoutJson: {
+        elements: [
+          { type: "image", x: 50, y: 50, w: 300, h: 200 }
+        ]
+      },
+      createdAt: new Date()
+    }
+  ];
+  await db.collection('template_pages').deleteMany({});
+  await db.collection('template_pages').insertMany(pages);
+  console.log('template_pages collection created and seeded!');
+}
+
+async function createAlbums(db) {
+  const vendor = await db.collection('vendors').findOne({});
+  const template = await db.collection('album_templates').findOne({});
+  const albums = [
+    {
+      vendorId: vendor ? vendor._id : null,
+      templateId: template ? template._id : null,
+      albumName: "Nethmi Wedding Album",
+      customerName: "Nethmi",
+      eventDate: new Date(),
+      status: "draft",
+      createdAt: new Date()
+    }
+  ];
+  await db.collection('albums').deleteMany({});
+  await db.collection('albums').insertMany(albums);
+  console.log('albums collection created and seeded!');
+}
+
+async function createAlbumPages(db) {
+  const album = await db.collection('albums').findOne({});
+  const pages = [
+    {
+      albumId: album ? album._id : null,
+      pageNumber: 1,
+      layoutJson: {
+        elements: [
+          { type: "image", x: 100, y: 100, w: 500, h: 400 }
+        ]
+      },
+      images: [],
+      updatedAt: new Date()
+    }
+  ];
+  await db.collection('album_pages').deleteMany({});
+  await db.collection('album_pages').insertMany(pages);
+  console.log('album_pages collection created and seeded!');
+}
 
  
 
@@ -487,6 +608,15 @@ async function main() {
     console.log(`Created collection: ${name}`);
   }
 
+  // Create unique indexes as per requirements
+  // template_pages: unique on (templateId, pageNumber)
+  await db.collection('template_pages').createIndex({ templateId: 1, pageNumber: 1 }, { unique: true });
+  // album_pages: unique on (albumId, pageNumber)
+  await db.collection('album_pages').createIndex({ albumId: 1, pageNumber: 1 }, { unique: true });
+  // album_page_slots: unique on (albumPageId, slotKey)
+  await db.collection('album_page_slots').createIndex({ albumPageId: 1, slotKey: 1 }, { unique: true });
+
+
 
   await createServiceCategories(db);
   await createSubPlanCollection(db);
@@ -499,6 +629,13 @@ async function main() {
   await createProductVendorsCollection(db);
   await createProposalVendorsCollection(db);
   await createVendorServicesCollection(db);
+
+  // Album Template System
+  await createTemplateCategories(db);
+  await createAlbumTemplates(db);
+  await createTemplatePages(db);
+  await createAlbums(db);
+  await createAlbumPages(db);
 
   await client.close();
   console.log('All collections created!');

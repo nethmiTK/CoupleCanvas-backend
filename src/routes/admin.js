@@ -312,6 +312,55 @@ router.delete('/service-categories/:id', async (req, res) => {
   }
 });
 
+// Admin login
+router.post('/login', async (req, res) => {
+  const db = getDb();
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  try {
+    const admin = await db.collection('admin').findOne({ email });
+    
+    if (!admin) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const passwordMatch = await bcrypt.compare(password, admin.password);
+    
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Update last login
+    await db.collection('admin').updateOne(
+      { _id: admin._id },
+      { $set: { lastLogin: new Date() } }
+    );
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: admin._id, email: admin.email, name: admin.name },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      message: 'Login successful',
+      token,
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get single admin by id (MOVED TO END to avoid route conflicts)
 router.get('/:id', async (req, res) => {
   const db = getDb();
