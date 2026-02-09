@@ -73,9 +73,212 @@ const collections = [
   , 'template_extra_layout_sequence'
   , 'uploads'
   , 'album_page_slots'
+  , 'layout_presets'
+  , 'vendor_subscriptions'
 ];
 
 // --- Album Template System Collections ---
+
+// Layout Presets - Reusable page layout designs for templates
+async function createLayoutPresets(db) {
+  const presets = [
+    {
+      name: 'full_bleed',
+      label: 'Full Bleed',
+      type: 'full',
+      slots: 1,
+      thumbnail: '🖼️',
+      pageCount: 20,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 0, y: 0, w: 600, h: 400, radius: 0 }
+        ]
+      },
+      bgColor: '#FFFFFF',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'split_2',
+      label: 'Split',
+      type: 'split',
+      slots: 2,
+      thumbnail: '⬛⬛',
+      pageCount: 20,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 0, y: 0, w: 295, h: 400, radius: 0 },
+          { type: 'image', x: 305, y: 0, w: 295, h: 400, radius: 0 }
+        ]
+      },
+      bgColor: '#FFFFFF',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'grid_3',
+      label: 'Grid 3',
+      type: 'grid',
+      slots: 3,
+      thumbnail: '🔲🔲🔲',
+      pageCount: 30,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 0, y: 0, w: 600, h: 200, radius: 8 },
+          { type: 'image', x: 0, y: 210, w: 295, h: 190, radius: 8 },
+          { type: 'image', x: 305, y: 210, w: 295, h: 190, radius: 8 }
+        ]
+      },
+      bgColor: '#FFFFFF',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'grid_4',
+      label: '4 Photo Grid',
+      type: 'grid',
+      slots: 4,
+      thumbnail: '⬛⬛⬛⬛',
+      pageCount: 20,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 0, y: 0, w: 295, h: 195, radius: 8 },
+          { type: 'image', x: 305, y: 0, w: 295, h: 195, radius: 8 },
+          { type: 'image', x: 0, y: 205, w: 295, h: 195, radius: 8 },
+          { type: 'image', x: 305, y: 205, w: 295, h: 195, radius: 8 }
+        ]
+      },
+      bgColor: '#FFFFFF',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'highlights_6',
+      label: 'Highlights',
+      type: 'collage',
+      slots: 6,
+      thumbnail: '📷📷📷',
+      pageCount: 30,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 0, y: 0, w: 195, h: 130, radius: 8 },
+          { type: 'image', x: 205, y: 0, w: 195, h: 130, radius: 8 },
+          { type: 'image', x: 410, y: 0, w: 190, h: 130, radius: 8 },
+          { type: 'image', x: 0, y: 140, w: 195, h: 130, radius: 8 },
+          { type: 'image', x: 205, y: 140, w: 195, h: 130, radius: 8 },
+          { type: 'image', x: 410, y: 140, w: 190, h: 130, radius: 8 }
+        ]
+      },
+      bgColor: '#FFFFFF',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'story_1',
+      label: 'Story',
+      type: 'story',
+      slots: 1,
+      thumbnail: '📝🖼️',
+      pageCount: 40,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 50, y: 50, w: 500, h: 250, radius: 12 },
+          { type: 'text', x: 50, y: 320, text: 'Your Story', fontSize: 24, fontFamily: 'Inter', color: '#1F2937' }
+        ]
+      },
+      bgColor: '#FFFFFF',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'classic_4',
+      label: 'Classic 4',
+      type: 'grid',
+      slots: 4,
+      thumbnail: '📸📸',
+      pageCount: 20,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 20, y: 20, w: 270, h: 175, radius: 4 },
+          { type: 'image', x: 310, y: 20, w: 270, h: 175, radius: 4 },
+          { type: 'image', x: 20, y: 215, w: 270, h: 175, radius: 4 },
+          { type: 'image', x: 310, y: 215, w: 270, h: 175, radius: 4 }
+        ]
+      },
+      bgColor: '#F9FAFB',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'modern_split',
+      label: 'Modern Split',
+      type: 'split',
+      slots: 2,
+      thumbnail: '🖼️🖼️',
+      pageCount: 30,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 0, y: 0, w: 350, h: 400, radius: 0 },
+          { type: 'image', x: 360, y: 50, w: 230, h: 300, radius: 12 }
+        ]
+      },
+      bgColor: '#FFFFFF',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'collage_5',
+      label: 'Collage 5',
+      type: 'collage',
+      slots: 5,
+      thumbnail: '🎨',
+      pageCount: 40,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 0, y: 0, w: 300, h: 250, radius: 8 },
+          { type: 'image', x: 310, y: 0, w: 290, h: 120, radius: 8 },
+          { type: 'image', x: 310, y: 130, w: 290, h: 120, radius: 8 },
+          { type: 'image', x: 0, y: 260, w: 195, h: 140, radius: 8 },
+          { type: 'image', x: 205, y: 260, w: 395, h: 140, radius: 8 }
+        ]
+      },
+      bgColor: '#FFFFFF',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    },
+    {
+      name: 'minimal_2',
+      label: 'Minimal',
+      type: 'split',
+      slots: 2,
+      thumbnail: '▪️▪️',
+      pageCount: 20,
+      layoutJson: {
+        elements: [
+          { type: 'image', x: 50, y: 50, w: 240, h: 300, radius: 4 },
+          { type: 'image', x: 310, y: 50, w: 240, h: 300, radius: 4 }
+        ]
+      },
+      bgColor: '#F3F4F6',
+      status: 'active',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+  ];
+  await db.collection('layout_presets').deleteMany({});
+  await db.collection('layout_presets').insertMany(presets);
+  console.log('layout_presets collection created and seeded!');
+}
+
 async function createTemplateCategories(db) {
   const categories = [
     {
@@ -631,6 +834,7 @@ async function main() {
   await createVendorServicesCollection(db);
 
   // Album Template System
+  await createLayoutPresets(db);
   await createTemplateCategories(db);
   await createAlbumTemplates(db);
   await createTemplatePages(db);

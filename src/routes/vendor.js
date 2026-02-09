@@ -403,4 +403,151 @@ router.post('/settings', async (req, res) => {
   res.json({ message: 'Settings updated successfully' });
 });
 
+// Vendor subscription
+router.post('/subscribe', async (req, res) => {
+  const db = getDb();
+  try {
+    const { vendorId, vendorType, planId, planName, amount, paymentSlip, status } = req.body;
+    
+    if (!vendorId || !vendorType || !planName) {
+      return res.status(400).json({ error: 'vendorId, vendorType, and planName are required' });
+    }
+
+    const subscription = {
+      vendorId: new ObjectId(vendorId),
+      vendorType,
+      planId,
+      planName,
+      amount: amount || 0,
+      paymentSlip: paymentSlip || null,
+      status: status || 'pending',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    // Check if subscription already exists
+    const existing = await db.collection('vendor_subscriptions').findOne({
+      vendorId: new ObjectId(vendorId),
+      vendorType
+    });
+
+    if (existing) {
+      await db.collection('vendor_subscriptions').updateOne(
+        { _id: existing._id },
+        { $set: { ...subscription, updatedAt: new Date() } }
+      );
+      return res.json({ message: 'Subscription updated', subscriptionId: existing._id });
+    }
+
+    const result = await db.collection('vendor_subscriptions').insertOne(subscription);
+    
+    // If free plan (status: active), update vendor status
+    if (status === 'active') {
+      await db.collection('vendors').updateOne(
+        { _id: new ObjectId(vendorId) },
+        { $set: { status: 'approved', subscriptionPlan: planName, updatedAt: new Date() } }
+      );
+    }
+
+    res.status(201).json({ 
+      message: 'Subscription created', 
+      subscriptionId: result.insertedId,
+      status 
+    });
+  } catch (error) {
+    console.error('Subscription error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get vendor subscription status
+router.get('/subscription/:vendorId', async (req, res) => {
+  const db = getDb();
+  try {
+    const { vendorId } = req.params;
+    const { vendorType } = req.query;
+
+    const query = { vendorId: new ObjectId(vendorId) };
+    if (vendorType) query.vendorType = vendorType;
+
+    const subscriptions = await db.collection('vendor_subscriptions')
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json({ subscriptions });
+  } catch (error) {
+    console.error('Get subscription error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin: Get all pending subscriptions
+router.get('/subscriptions/pending', async (req, res) => {
+  const db = getDb();
+  try {
+    const subscriptions = await db.collection('vendor_subscriptions')
+      .aggregate([
+        { $match: { status: 'pending' } },
+        {
+          $lookup: {
+            from: 'vendors',
+            localField: 'vendorId',
+            foreignField: '_id',
+            as: 'vendor'
+          }
+        },
+        { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
+        { $sort: { createdAt: -1 } }
+      ])
+      .toArray();
+
+    res.json({ subscriptions });
+  } catch (error) {
+    console.error('Get pending subscriptions error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin: Approve/Reject subscription
+router.patch('/subscription/:id/status', async (req, res) => {
+  const db = getDb();
+  try {
+    const { id } = req.params;
+    const { status } = req.body; // 'active' or 'rejected'
+
+    const subscription = await db.collection('vendor_subscriptions').findOne({
+      _id: new ObjectId(id)
+    });
+
+    if (!subscription) {
+      return res.status(404).json({ error: 'Subscription not found' });
+    }
+
+    await db.collection('vendor_subscriptions').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+
+    // If approved, update vendor status
+    if (status === 'active') {
+      await db.collection('vendors').updateOne(
+        { _id: subscription.vendorId },
+        { 
+          $set: { 
+            status: 'approved', 
+            subscriptionPlan: subscription.planName, 
+            updatedAt: new Date() 
+          } 
+        }
+      );
+    }
+
+    res.json({ message: `Subscription ${status}`, subscriptionId: id });
+  } catch (error) {
+    console.error('Update subscription status error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

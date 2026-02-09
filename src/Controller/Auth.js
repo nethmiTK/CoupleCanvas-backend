@@ -125,6 +125,9 @@ const registerVendor = async (req, res) => {
     res.status(201).json({
       message: 'Registration successful! Your account is pending admin approval.',
       vendorId: vendorId,
+      email: email,
+      username: username,
+      vendorTypes: vendorTypesArray,
       status: 'pending',
     });
   } catch (error) {

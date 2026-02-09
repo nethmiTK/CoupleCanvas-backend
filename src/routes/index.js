@@ -16,6 +16,7 @@ const paymentSystemRoutes = require('./payment_system');
 const uploadRoutes = require('./upload');
 const subscriptionRoutes = require('./subscription');
 const templateCategoriesRoutes = require('./template_categories');
+const albumAdminRoutes = require('./AlbumAdminRoutes');
 
 // Health check
 router.get('/', (req, res) => res.json({ 
@@ -52,5 +53,8 @@ router.use('/sub_plan', subPlanRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/template-categories', templateCategoriesRoutes);
 router.use('/', subscriptionRoutes);
+
+// Album Admin Routes
+router.use('/admin/album', albumAdminRoutes);
 
 module.exports = router;
