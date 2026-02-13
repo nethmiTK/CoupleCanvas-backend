@@ -16,7 +16,9 @@ const {
   getAlbumById,
   updateVendorAlbum,
   togglePublishAlbum,
-  deleteVendorAlbum
+  deleteVendorAlbum,
+  getPublicAlbums,
+  getPublicAlbumById
 } = require('../../Controller/VendorAlbumController/vendoralbum');
 
 // Ensure upload directories exist
@@ -98,13 +100,21 @@ router.get('/albums/:id', getAlbumById);
 // POST /vendor-album/albums - Create album with images
 router.post('/albums', uploadAlbumImages.array('images', 50), createVendorAlbum);
 
-// PUT /vendor-album/albums/:id - Update album
-router.put('/albums/:id', updateVendorAlbum);
+// PUT /vendor-album/albums/:id - Update album (with image upload support)
+router.put('/albums/:id', uploadAlbumImages.array('images', 50), updateVendorAlbum);
 
 // PATCH /vendor-album/albums/:id/publish - Toggle publish status
 router.patch('/albums/:id/publish', togglePublishAlbum);
 
 // DELETE /vendor-album/albums/:id - Delete album
 router.delete('/albums/:id', deleteVendorAlbum);
+
+// ======================== PUBLIC ROUTES (no auth) ========================
+
+// GET /vendor-album/public/albums - Get all published albums
+router.get('/public/albums', getPublicAlbums);
+
+// GET /vendor-album/public/albums/:id - Get single published album
+router.get('/public/albums/:id', getPublicAlbumById);
 
 module.exports = router;

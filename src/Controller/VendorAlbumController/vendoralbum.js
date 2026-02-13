@@ -312,22 +312,116 @@ const getAlbumById = async (req, res) => {
   }
 };
 
-// Update vendor album
+// Update vendor album (supports adding/removing images and reordering)
 const updateVendorAlbum = async (req, res) => {
   const db = getDb();
   try {
     const { id } = req.params;
-    const updateData = { ...req.body };
-    delete updateData._id;
+    const {
+      album_title,
+      description,
+      price,
+      category,
+      template_id,
+      template_data,
+      existing_images, // JSON string array of image paths to KEEP
+      image_order,     // JSON array: ["existing:/uploads/albums/x.jpg", "new", "existing:/uploads/albums/y.jpg", "new"]
+    } = req.body;
 
-    updateData.updatedAt = new Date();
+    // Get current album
+    const currentAlbum = await db.collection('albums').findOne({ _id: new ObjectId(id) });
+    if (!currentAlbum) {
+      return res.status(404).json({ error: 'Album not found' });
+    }
+
+    // Build updated images list respecting order
+    let updatedImages = [];
+
+    if (image_order) {
+      // New ordering system: interleave existing and new images in user-defined order
+      let order;
+      try {
+        order = typeof image_order === 'string' ? JSON.parse(image_order) : image_order;
+      } catch (e) { order = null; }
+
+      if (Array.isArray(order)) {
+        let newFileIdx = 0;
+        const uploadedPaths = [];
+        if (req.files && req.files.length > 0) {
+          req.files.forEach(file => {
+            uploadedPaths.push(`/uploads/albums/${file.filename}`);
+          });
+        }
+
+        for (const entry of order) {
+          if (entry === 'new') {
+            if (newFileIdx < uploadedPaths.length) {
+              updatedImages.push(uploadedPaths[newFileIdx]);
+              newFileIdx++;
+            }
+          } else if (typeof entry === 'string' && entry.startsWith('existing:')) {
+            const path = entry.replace('existing:', '');
+            updatedImages.push(path);
+          }
+        }
+      }
+    } else {
+      // Fallback: old behavior
+      if (existing_images) {
+        try {
+          const kept = typeof existing_images === 'string' ? JSON.parse(existing_images) : existing_images;
+          if (Array.isArray(kept)) updatedImages = kept;
+        } catch (e) {
+          // ignore parse error
+        }
+      }
+
+      // Add newly uploaded images at the end
+      if (req.files && req.files.length > 0) {
+        req.files.forEach(file => {
+          updatedImages.push(`/uploads/albums/${file.filename}`);
+        });
+      }
+    }
+
+    // Delete removed image files from disk
+    const fs = require('fs');
+    const path = require('path');
+    let oldImages = [];
+    try {
+      oldImages = typeof currentAlbum.images === 'string' ? JSON.parse(currentAlbum.images) : (currentAlbum.images || []);
+    } catch (e) { oldImages = []; }
+
+    oldImages.forEach(oldImg => {
+      if (!updatedImages.includes(oldImg)) {
+        const filePath = path.join(__dirname, '../../../public', oldImg);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+    });
+
+    const parsedTemplateData = template_data
+      ? (typeof template_data === 'string' ? JSON.parse(template_data) : template_data)
+      : currentAlbum.template_data;
+
+    const updateData = {
+      album_title: album_title || currentAlbum.album_title,
+      description: description !== undefined ? description : currentAlbum.description,
+      price: price !== undefined ? parseFloat(price) || 0 : currentAlbum.price,
+      category: category || currentAlbum.category,
+      template_id: template_id || currentAlbum.template_id,
+      template_data: parsedTemplateData,
+      images: JSON.stringify(updatedImages),
+      updatedAt: new Date(),
+    };
 
     await db.collection('albums').updateOne(
       { _id: new ObjectId(id) },
       { $set: updateData }
     );
 
-    res.json({ message: 'Album updated successfully' });
+    res.json({ message: 'Album updated successfully', album: { ...currentAlbum, ...updateData, _id: id } });
   } catch (error) {
     console.error('Error updating album:', error);
     res.status(500).json({ error: error.message });
@@ -374,6 +468,78 @@ const deleteVendorAlbum = async (req, res) => {
   }
 };
 
+// ======================== PUBLIC ALBUMS ========================
+
+// Get all published albums (public - no auth needed)
+const getPublicAlbums = async (req, res) => {
+  const db = getDb();
+  try {
+    const { category } = req.query;
+    const query = { publish_status: 'published' };
+
+    if (category && category !== 'All') {
+      query.category = category;
+    }
+
+    const albums = await db.collection('albums')
+      .aggregate([
+        { $match: query },
+        {
+          $lookup: {
+            from: 'album_templates',
+            let: { templateId: { $toObjectId: '$template_id' } },
+            pipeline: [
+              { $match: { $expr: { $eq: ['$_id', '$$templateId'] } } }
+            ],
+            as: 'template'
+          }
+        },
+        { $unwind: { path: '$template', preserveNullAndEmptyArrays: true } },
+        { $sort: { createdAt: -1 } }
+      ])
+      .toArray();
+
+    res.json({ albums });
+  } catch (error) {
+    console.error('Error fetching public albums:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get single public album by ID
+const getPublicAlbumById = async (req, res) => {
+  const db = getDb();
+  try {
+    const { id } = req.params;
+
+    const albums = await db.collection('albums')
+      .aggregate([
+        { $match: { _id: new ObjectId(id), publish_status: 'published' } },
+        {
+          $lookup: {
+            from: 'album_templates',
+            let: { templateId: { $toObjectId: '$template_id' } },
+            pipeline: [
+              { $match: { $expr: { $eq: ['$_id', '$$templateId'] } } }
+            ],
+            as: 'template'
+          }
+        },
+        { $unwind: { path: '$template', preserveNullAndEmptyArrays: true } }
+      ])
+      .toArray();
+
+    if (!albums.length) {
+      return res.status(404).json({ error: 'Album not found' });
+    }
+
+    res.json({ album: albums[0] });
+  } catch (error) {
+    console.error('Error fetching public album:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getAllAlbumTemplates,
   getTemplateCategories,
@@ -386,5 +552,7 @@ module.exports = {
   getAlbumById,
   updateVendorAlbum,
   togglePublishAlbum,
-  deleteVendorAlbum
+  deleteVendorAlbum,
+  getPublicAlbums,
+  getPublicAlbumById
 };
