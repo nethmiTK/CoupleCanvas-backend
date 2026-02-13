@@ -12,7 +12,16 @@ const { errorHandler, notFound } = require('./middleware/errorHandler');
 const path = require('path');
 const app = express();
 
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:', 'blob:', '*'],
+      styleSrc: ["'self'", 'https:', "'unsafe-inline'"],
+    },
+  },
+}));
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));

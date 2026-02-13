@@ -82,7 +82,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const db = getDb();
-    const { vendor_id, template_id, title, description, images, selectedPresets } = req.body;
+    const { vendor_id, template_id, title, description, images, selectedPresets, pages } = req.body;
 
     const result = await db.collection('albums').insertOne({
       vendor_id: new ObjectId(vendor_id),
@@ -91,6 +91,7 @@ router.post('/', async (req, res) => {
       description: description || '',
       images: images || [],
       selectedPresets: selectedPresets || [],
+      pages: pages || [], // [{presetId, presetName, slots: [{slotIndex, imageUrl}]}]
       created_at: new Date(),
       updated_at: new Date()
     });
@@ -109,13 +110,14 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
-    const { title, description, images, selectedPresets, template_id } = req.body;
+    const { title, description, images, selectedPresets, template_id, pages } = req.body;
 
     const updateFields = { updated_at: new Date() };
     if (title !== undefined) updateFields.title = title;
     if (description !== undefined) updateFields.description = description;
     if (images !== undefined) updateFields.images = images;
     if (selectedPresets !== undefined) updateFields.selectedPresets = selectedPresets;
+    if (pages !== undefined) updateFields.pages = pages;
     if (template_id) updateFields.template_id = new ObjectId(template_id);
 
     const result = await db.collection('albums').updateOne(

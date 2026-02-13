@@ -18,6 +18,7 @@ const subscriptionRoutes = require('./subscription');
 const templateCategoriesRoutes = require('./template_categories');
 const albumAdminRoutes = require('./AlbumAdminRoutes');
 const albumVendorsRoutes = require('./album_vendors');
+const vendorAlbumRoutes = require('./VendorAlbumRoutes/vendoralbum');
 
 // Health check
 router.get('/', (req, res) => res.json({ 
@@ -57,6 +58,9 @@ router.use('/', subscriptionRoutes);
 
 // Album Admin Routes
 router.use('/admin/album', albumAdminRoutes);
+
+// Vendor Album Routes (templates + albums CRUD)
+router.use('/vendor-album', vendorAlbumRoutes);
 
 // Album Vendors Routes
 router.use('/album-vendors', albumVendorsRoutes);
