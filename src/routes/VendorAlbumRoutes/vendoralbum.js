@@ -98,10 +98,16 @@ router.get('/albums', getVendorAlbums);
 router.get('/albums/:id', getAlbumById);
 
 // POST /vendor-album/albums - Create album with images
-router.post('/albums', uploadAlbumImages.array('images', 50), createVendorAlbum);
+router.post('/albums', uploadAlbumImages.fields([
+  { name: 'images', maxCount: 50 },
+  { name: 'cover_image', maxCount: 1 }
+]), createVendorAlbum);
 
 // PUT /vendor-album/albums/:id - Update album (with image upload support)
-router.put('/albums/:id', uploadAlbumImages.array('images', 50), updateVendorAlbum);
+router.put('/albums/:id', uploadAlbumImages.fields([
+  { name: 'images', maxCount: 50 },
+  { name: 'cover_image', maxCount: 1 }
+]), updateVendorAlbum);
 
 // PATCH /vendor-album/albums/:id/publish - Toggle publish status
 router.patch('/albums/:id/publish', togglePublishAlbum);
@@ -116,5 +122,61 @@ router.get('/public/albums', getPublicAlbums);
 
 // GET /vendor-album/public/albums/:id - Get single published album
 router.get('/public/albums/:id', getPublicAlbumById);
+
+// GET /vendor-album/public/videos - Get all available videos
+router.get('/public/videos', async (req, res) => {
+  try {
+    const { getDb } = require('../../db/mongo');
+    const { ObjectId } = require('mongodb');
+    const db = getDb();
+    
+    const videos = await db.collection('vendor_video').aggregate([
+      { 
+        $match: { 
+          $or: [
+            { availability: true },
+            { availability: 'true' },
+            { available: true },
+            { status: 'available' },
+            { status: 'active' }
+          ]
+        } 
+      },
+      // Lookup vendor information
+      {
+        $lookup: {
+          from: 'album_vendors',
+          let: { 
+            vendorId: { 
+              $cond: {
+                if: { $eq: [{ $type: '$vendor_id' }, 'objectId'] },
+                then: '$vendor_id',
+                else: { 
+                  $cond: {
+                    if: { $ne: ['$vendor_id', null] },
+                    then: { $toObjectId: '$vendor_id' },
+                    else: null
+                  }
+                }
+              }
+            }
+          },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$_id', '$$vendorId'] } } },
+            { $project: { businessName: 1, ownerName: 1, logo: 1 } }
+          ],
+          as: 'vendor'
+        }
+      },
+      { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
+      { $sort: { created_at: -1, createdAt: -1 } }
+    ]).toArray();
+    
+    res.json({ videos });
+  } catch (err) {
+    console.error('Error fetching public videos:', err);
+    res.status(500).json({ error: 'Failed to fetch videos', videos: [] });
+  }
+});
 
 module.exports = router;

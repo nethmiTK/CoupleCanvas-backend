@@ -82,7 +82,9 @@ const createAlbumTemplate = async (req, res) => {
       background,
       decorations,
       colors,
-      thumbnail
+      thumbnail,
+      gridPatterns,
+      coverStyle
     } = req.body;
 
     if (!name || !category) {
@@ -94,6 +96,8 @@ const createAlbumTemplate = async (req, res) => {
     const parsedBackground = typeof background === 'string' ? JSON.parse(background) : (background || { type: 'solid', value: '#ffffff' });
     const parsedDecorations = typeof decorations === 'string' ? JSON.parse(decorations) : (decorations || { type: 'none', positions: [] });
     const parsedColors = typeof colors === 'string' ? JSON.parse(colors) : (colors || { primary: '#E91E63', secondary: '#FCE4EC', accent: '#FF4081', text: '#880E4F' });
+    const parsedGridPatterns = typeof gridPatterns === 'string' ? JSON.parse(gridPatterns) : (gridPatterns || null);
+    const parsedCoverStyle = typeof coverStyle === 'string' ? JSON.parse(coverStyle) : (coverStyle || null);
 
     const template = {
       vendor_id: vendor_id || null,
@@ -106,6 +110,8 @@ const createAlbumTemplate = async (req, res) => {
       decorations: parsedDecorations,
       colors: parsedColors,
       thumbnail: thumbnail || '',
+      gridPatterns: parsedGridPatterns,
+      coverStyle: parsedCoverStyle,
       status: 'active',
       createdAt: new Date(),
       updatedAt: new Date()
@@ -137,6 +143,8 @@ const updateAlbumTemplate = async (req, res) => {
     if (typeof updateData.background === 'string') updateData.background = JSON.parse(updateData.background);
     if (typeof updateData.decorations === 'string') updateData.decorations = JSON.parse(updateData.decorations);
     if (typeof updateData.colors === 'string') updateData.colors = JSON.parse(updateData.colors);
+    if (typeof updateData.gridPatterns === 'string') updateData.gridPatterns = JSON.parse(updateData.gridPatterns);
+    if (typeof updateData.coverStyle === 'string') updateData.coverStyle = JSON.parse(updateData.coverStyle);
 
     updateData.updatedAt = new Date();
 
@@ -226,22 +234,36 @@ const createVendorAlbum = async (req, res) => {
       description,
       price,
       category,
-      template_data
+      template_data,
+      page_settings,
+      cover_page,
+      pages
     } = req.body;
 
     if (!vendor_id || !album_title) {
       return res.status(400).json({ error: 'vendor_id and album_title are required' });
     }
 
-    // Handle uploaded images
+    // Handle uploaded images (multer.fields produces req.files as an object)
     const images = [];
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(file => {
+    const uploadedImages = req.files && req.files['images'];
+    if (uploadedImages && uploadedImages.length > 0) {
+      uploadedImages.forEach(file => {
         images.push(`/uploads/albums/${file.filename}`);
       });
     }
 
+    // Handle cover image
+    let coverImagePath = null;
+    const uploadedCover = req.files && req.files['cover_image'];
+    if (uploadedCover && uploadedCover.length > 0) {
+      coverImagePath = `/uploads/albums/${uploadedCover[0].filename}`;
+    }
+
     const parsedTemplateData = typeof template_data === 'string' ? JSON.parse(template_data) : template_data;
+    const parsedPageSettings = typeof page_settings === 'string' ? JSON.parse(page_settings) : (page_settings || []);
+    const parsedCoverPage = typeof cover_page === 'string' ? JSON.parse(cover_page) : (cover_page || null);
+    const parsedPages = typeof pages === 'string' ? JSON.parse(pages) : (pages || []);
 
     const album = {
       vendor_id,
@@ -252,6 +274,10 @@ const createVendorAlbum = async (req, res) => {
       category: category || '',
       images: JSON.stringify(images),
       template_data: parsedTemplateData || null,
+      page_settings: parsedPageSettings,
+      pages: parsedPages,
+      cover_page: parsedCoverPage,
+      cover_image: coverImagePath,
       availability_status: 'available',
       publish_status: 'published',
       createdAt: new Date(),
@@ -324,6 +350,9 @@ const updateVendorAlbum = async (req, res) => {
       category,
       template_id,
       template_data,
+      page_settings,
+      pages,
+      cover_page,
       existing_images, // JSON string array of image paths to KEEP
       image_order,     // JSON array: ["existing:/uploads/albums/x.jpg", "new", "existing:/uploads/albums/y.jpg", "new"]
     } = req.body;
@@ -337,6 +366,9 @@ const updateVendorAlbum = async (req, res) => {
     // Build updated images list respecting order
     let updatedImages = [];
 
+    // req.files is now an object (from multer.fields)
+    const uploadedImageFiles = req.files && req.files['images'];
+
     if (image_order) {
       // New ordering system: interleave existing and new images in user-defined order
       let order;
@@ -347,8 +379,8 @@ const updateVendorAlbum = async (req, res) => {
       if (Array.isArray(order)) {
         let newFileIdx = 0;
         const uploadedPaths = [];
-        if (req.files && req.files.length > 0) {
-          req.files.forEach(file => {
+        if (uploadedImageFiles && uploadedImageFiles.length > 0) {
+          uploadedImageFiles.forEach(file => {
             uploadedPaths.push(`/uploads/albums/${file.filename}`);
           });
         }
@@ -377,12 +409,23 @@ const updateVendorAlbum = async (req, res) => {
       }
 
       // Add newly uploaded images at the end
-      if (req.files && req.files.length > 0) {
-        req.files.forEach(file => {
+      if (uploadedImageFiles && uploadedImageFiles.length > 0) {
+        uploadedImageFiles.forEach(file => {
           updatedImages.push(`/uploads/albums/${file.filename}`);
         });
       }
     }
+
+    // Handle cover image
+    let coverImagePath = currentAlbum.cover_image || null;
+    const uploadedCover = req.files && req.files['cover_image'];
+    if (uploadedCover && uploadedCover.length > 0) {
+      coverImagePath = `/uploads/albums/${uploadedCover[0].filename}`;
+    }
+
+    const parsedCoverPage = cover_page
+      ? (typeof cover_page === 'string' ? JSON.parse(cover_page) : cover_page)
+      : (currentAlbum.cover_page || null);
 
     // Delete removed image files from disk
     const fs = require('fs');
@@ -412,7 +455,15 @@ const updateVendorAlbum = async (req, res) => {
       category: category || currentAlbum.category,
       template_id: template_id || currentAlbum.template_id,
       template_data: parsedTemplateData,
+      page_settings: page_settings
+        ? (typeof page_settings === 'string' ? JSON.parse(page_settings) : page_settings)
+        : (currentAlbum.page_settings || []),
+      pages: pages
+        ? (typeof pages === 'string' ? JSON.parse(pages) : pages)
+        : (currentAlbum.pages || []),
       images: JSON.stringify(updatedImages),
+      cover_page: parsedCoverPage,
+      cover_image: coverImagePath,
       updatedAt: new Date(),
     };
 
@@ -470,39 +521,72 @@ const deleteVendorAlbum = async (req, res) => {
 
 // ======================== PUBLIC ALBUMS ========================
 
+// Helper to check if string is valid ObjectId
+const isValidObjectId = (id) => {
+  if (!id) return false;
+  const str = String(id);
+  return /^[0-9a-fA-F]{24}$/.test(str);
+};
+
 // Get all published albums (public - no auth needed)
 const getPublicAlbums = async (req, res) => {
   const db = getDb();
   try {
     const { category } = req.query;
-    const query = { publish_status: 'published' };
+    // Match albums that are published
+    const query = { 
+      $or: [
+        { publish_status: 'published' },
+        { publish_status: 'Published' }
+      ]
+    };
 
     if (category && category !== 'All') {
       query.category = category;
     }
 
+    // Fetch albums
     const albums = await db.collection('albums')
-      .aggregate([
-        { $match: query },
-        {
-          $lookup: {
-            from: 'album_templates',
-            let: { templateId: { $toObjectId: '$template_id' } },
-            pipeline: [
-              { $match: { $expr: { $eq: ['$_id', '$$templateId'] } } }
-            ],
-            as: 'template'
-          }
-        },
-        { $unwind: { path: '$template', preserveNullAndEmptyArrays: true } },
-        { $sort: { createdAt: -1 } }
-      ])
+      .find(query)
+      .sort({ createdAt: -1 })
       .toArray();
 
-    res.json({ albums });
+    // Fetch templates and vendors in bulk
+    const templateIds = albums
+      .filter(a => isValidObjectId(a.template_id))
+      .map(a => new ObjectId(a.template_id));
+    
+    const vendorIds = albums
+      .filter(a => isValidObjectId(a.vendor_id))
+      .map(a => new ObjectId(String(a.vendor_id)));
+
+    const [templates, vendors] = await Promise.all([
+      templateIds.length > 0 
+        ? db.collection('album_templates').find({ _id: { $in: templateIds } }).toArray()
+        : [],
+      vendorIds.length > 0
+        ? db.collection('album_vendors').find(
+            { _id: { $in: vendorIds } },
+            { projection: { businessName: 1, ownerName: 1, phone: 1, logo: 1 } }
+          ).toArray()
+        : []
+    ]);
+
+    // Create lookup maps
+    const templateMap = new Map(templates.map(t => [t._id.toString(), t]));
+    const vendorMap = new Map(vendors.map(v => [v._id.toString(), v]));
+
+    // Enrich albums with template and vendor data
+    const enrichedAlbums = albums.map(album => ({
+      ...album,
+      template: isValidObjectId(album.template_id) ? templateMap.get(String(album.template_id)) || null : null,
+      vendor: isValidObjectId(album.vendor_id) ? vendorMap.get(String(album.vendor_id)) || null : null
+    }));
+
+    res.json({ albums: enrichedAlbums });
   } catch (error) {
     console.error('Error fetching public albums:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: error.message, albums: [] });
   }
 };
 

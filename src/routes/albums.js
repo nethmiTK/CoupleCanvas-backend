@@ -42,7 +42,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get single album by ID
+// Get single album by ID (with presets data for viewer)
 router.get('/:id', async (req, res) => {
   try {
     const db = getDb();
@@ -71,7 +71,11 @@ router.get('/:id', async (req, res) => {
     if (!album.length) {
       return res.status(404).json({ error: 'Album not found' });
     }
-    res.json({ album: album[0] });
+
+    // Fetch all layout presets for rendering
+    const allPresets = await db.collection('layout_presets').find({}).toArray();
+
+    res.json({ album: album[0], presets: allPresets });
   } catch (err) {
     console.error('Error fetching album:', err);
     res.status(500).json({ error: 'Failed to fetch album' });
@@ -82,7 +86,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const db = getDb();
-    const { vendor_id, template_id, title, description, images, selectedPresets, pages } = req.body;
+    const { vendor_id, template_id, title, description, images, selectedPresets, pages, coverPage } = req.body;
 
     const result = await db.collection('albums').insertOne({
       vendor_id: new ObjectId(vendor_id),
@@ -91,7 +95,8 @@ router.post('/', async (req, res) => {
       description: description || '',
       images: images || [],
       selectedPresets: selectedPresets || [],
-      pages: pages || [], // [{presetId, presetName, slots: [{slotIndex, imageUrl}]}]
+      pages: pages || [],
+      coverPage: coverPage || null,
       created_at: new Date(),
       updated_at: new Date()
     });
@@ -110,7 +115,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const db = getDb();
-    const { title, description, images, selectedPresets, template_id, pages } = req.body;
+    const { title, description, images, selectedPresets, template_id, pages, coverPage } = req.body;
 
     const updateFields = { updated_at: new Date() };
     if (title !== undefined) updateFields.title = title;
@@ -118,6 +123,7 @@ router.put('/:id', async (req, res) => {
     if (images !== undefined) updateFields.images = images;
     if (selectedPresets !== undefined) updateFields.selectedPresets = selectedPresets;
     if (pages !== undefined) updateFields.pages = pages;
+    if (coverPage !== undefined) updateFields.coverPage = coverPage;
     if (template_id) updateFields.template_id = new ObjectId(template_id);
 
     const result = await db.collection('albums').updateOne(

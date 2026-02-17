@@ -256,12 +256,10 @@ const loginCustomer = async (req, res) => {
   }
 };
 
-// Logout (stateless)
 const logout = (req, res) => {
   res.json({ message: 'Logged out successfully' });
 };
 
-// Customer Logout (stateless)
 const customerLogout = (req, res) => {
   res.json({ message: 'Customer logged out successfully' });
 };

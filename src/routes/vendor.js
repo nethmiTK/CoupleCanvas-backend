@@ -1,7 +1,26 @@
 const express = require('express');
 const { getDb } = require('../db/mongo');
 const { ObjectId } = require('mongodb');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const router = express.Router();
+
+// Ensure profile uploads directory exists
+const profileUploadsDir = path.join(__dirname, '../../public/uploads/profiles');
+if (!fs.existsSync(profileUploadsDir)) {
+  fs.mkdirSync(profileUploadsDir, { recursive: true });
+}
+
+// Multer config for profile images
+const profileStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, profileUploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `profile-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  }
+});
+const uploadProfileImage = multer({ storage: profileStorage });
 
 // Complete vendor registration
 router.post('/register', async (req, res) => {
@@ -35,7 +54,7 @@ router.post('/register', async (req, res) => {
   });
 });
 
-// Get vendor profile
+// Get vendor profile by query param
 router.get('/profile', async (req, res) => {
   const db = getDb();
   const { user_id } = req.query;
@@ -44,20 +63,143 @@ router.get('/profile', async (req, res) => {
     return res.status(400).json({ error: 'user_id is required' });
   }
   
-  const profile = await db.collection('vendor_profiles').aggregate([
-    { $match: { user_id: new ObjectId(user_id) } },
-    {
-      $lookup: {
-        from: 'users',
-        localField: 'user_id',
-        foreignField: '_id',
-        as: 'user'
-      }
-    },
-    { $unwind: '$user' }
-  ]).toArray();
+  try {
+    const profile = await db.collection('vendor_profiles').aggregate([
+      { $match: { user_id: new ObjectId(user_id) } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
+    ]).toArray();
+    
+    res.json({ profile: profile[0] || null });
+  } catch (err) {
+    console.error('Error fetching profile:', err);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// Get vendor profile by vendor_id path param
+router.get('/profile/:vendor_id', async (req, res) => {
+  const db = getDb();
+  const { vendor_id } = req.params;
   
-  res.json({ profile: profile[0] || null });
+  try {
+    // First try to find by vendor_profiles _id
+    let vendor = await db.collection('vendor_profiles').aggregate([
+      { $match: { _id: new ObjectId(vendor_id) } },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
+    ]).toArray();
+
+    if (vendor.length > 0) {
+      const v = vendor[0];
+      return res.json({
+        _id: v._id,
+        name: v.user?.name || v.business_name || '',
+        email: v.user?.email || '',
+        phone: v.user?.phone || v.phone || '',
+        address: v.address || '',
+        business_name: v.business_name || '',
+        business_type: v.vendor_type_id || '',
+        description: v.description || '',
+        profile_image: v.profile_image || v.user?.profile_image || '',
+        social_links: v.social_links || {},
+        created_at: v.created_at
+      });
+    }
+
+    // If not found, return empty profile that can be created
+    res.json({
+      _id: vendor_id,
+      name: '',
+      email: '',
+      phone: '',
+      address: '',
+      business_name: '',
+      business_type: '',
+      description: '',
+      profile_image: '',
+      social_links: {},
+    });
+  } catch (err) {
+    console.error('Error fetching vendor profile:', err);
+    res.status(500).json({ error: 'Failed to fetch vendor profile' });
+  }
+});
+
+// Update vendor profile
+router.put('/profile/:vendor_id', uploadProfileImage.single('profile_image'), async (req, res) => {
+  const db = getDb();
+  const { vendor_id } = req.params;
+  const { 
+    name, phone, address, 
+    business_name, business_type, description,
+    wedding_date
+  } = req.body;
+  
+  // Parse social_links if it's a string
+  let social_links = req.body.social_links;
+  if (typeof social_links === 'string') {
+    try {
+      social_links = JSON.parse(social_links);
+    } catch {
+      social_links = {};
+    }
+  }
+  
+  // Get profile image path if uploaded
+  let profile_image = req.body.profile_image_existing;
+  if (req.file) {
+    profile_image = `/uploads/profiles/${req.file.filename}`;
+  }
+  
+  try {
+    // Update or create vendor profile
+    const result = await db.collection('vendor_profiles').updateOne(
+      { _id: new ObjectId(vendor_id) },
+      { 
+        $set: { 
+          business_name: business_name || '',
+          address: address || '',
+          description: description || '',
+          phone: phone || '',
+          profile_image: profile_image || '',
+          social_links: social_links || {},
+          vendor_type_id: business_type || '',
+          wedding_date: wedding_date ? new Date(wedding_date) : null,
+          updated_at: new Date()
+        }
+      },
+      { upsert: true }
+    );
+
+    // Also update user if exists
+    const vendorProfile = await db.collection('vendor_profiles').findOne({ _id: new ObjectId(vendor_id) });
+    if (vendorProfile?.user_id) {
+      await db.collection('users').updateOne(
+        { _id: vendorProfile.user_id },
+        { $set: { name, phone, updated_at: new Date() } }
+      );
+    }
+
+    res.json({ message: 'Profile updated successfully' });
+  } catch (err) {
+    console.error('Error updating profile:', err);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
 });
 
 // Get vendor by ID
@@ -318,54 +460,106 @@ router.get('/video', async (req, res) => {
   const db = getDb();
   const { vendor_id } = req.query;
   
-  const videos = await db.collection('vendor_video').find({
-    vendor_id: new ObjectId(vendor_id)
-  }).toArray();
+  if (!vendor_id) {
+    return res.status(400).json({ error: 'vendor_id is required', videos: [] });
+  }
   
-  res.json({ videos });
+  try {
+    const videos = await db.collection('vendor_video').find({
+      vendor_id: new ObjectId(vendor_id)
+    }).sort({ created_at: -1 }).toArray();
+    
+    res.json({ videos });
+  } catch (err) {
+    console.error('Error fetching videos:', err);
+    res.status(500).json({ error: 'Failed to fetch videos', videos: [] });
+  }
+});
+
+// Public videos - get all available videos
+router.get('/video/public', async (req, res) => {
+  const db = getDb();
+  
+  try {
+    const videos = await db.collection('vendor_video').find({
+      availability: true
+    }).sort({ created_at: -1 }).toArray();
+    
+    res.json({ videos });
+  } catch (err) {
+    console.error('Error fetching public videos:', err);
+    res.status(500).json({ error: 'Failed to fetch videos', videos: [] });
+  }
 });
 
 router.post('/video', async (req, res) => {
   const db = getDb();
   const { vendor_id, video_url, thumbnail, title, description } = req.body;
   
-  const result = await db.collection('vendor_video').insertOne({
-    vendor_id: new ObjectId(vendor_id),
-    video_url,
-    thumbnail,
-    title,
-    description,
-    availability: true,
-    created_at: new Date()
-  });
+  if (!vendor_id || !video_url || !title) {
+    return res.status(400).json({ error: 'vendor_id, video_url and title are required' });
+  }
   
-  res.status(201).json({ 
-    message: 'Video created successfully',
-    videoId: result.insertedId 
-  });
+  try {
+    const result = await db.collection('vendor_video').insertOne({
+      vendor_id: new ObjectId(vendor_id),
+      video_url,
+      thumbnail: thumbnail || '',
+      title,
+      description: description || '',
+      availability: true,
+      created_at: new Date()
+    });
+    
+    res.status(201).json({ 
+      message: 'Video created successfully',
+      videoId: result.insertedId 
+    });
+  } catch (err) {
+    console.error('Error creating video:', err);
+    res.status(500).json({ error: 'Failed to create video' });
+  }
 });
 
 router.put('/video', async (req, res) => {
   const db = getDb();
   const { video_id, availability } = req.body;
   
-  await db.collection('vendor_video').updateOne(
-    { _id: new ObjectId(video_id) },
-    { $set: { availability } }
-  );
+  if (!video_id) {
+    return res.status(400).json({ error: 'video_id is required' });
+  }
   
-  res.json({ message: 'Video updated successfully' });
+  try {
+    await db.collection('vendor_video').updateOne(
+      { _id: new ObjectId(video_id) },
+      { $set: { availability, updated_at: new Date() } }
+    );
+    
+    res.json({ message: 'Video updated successfully' });
+  } catch (err) {
+    console.error('Error updating video:', err);
+    res.status(500).json({ error: 'Failed to update video' });
+  }
 });
 
 router.delete('/video', async (req, res) => {
   const db = getDb();
   const { video_id } = req.query;
   
-  await db.collection('vendor_video').deleteOne({
-    _id: new ObjectId(video_id)
-  });
+  if (!video_id) {
+    return res.status(400).json({ error: 'video_id is required' });
+  }
   
-  res.json({ message: 'Video deleted successfully' });
+  try {
+    await db.collection('vendor_video').deleteOne({
+      _id: new ObjectId(video_id)
+    });
+    
+    res.json({ message: 'Video deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting video:', err);
+    res.status(500).json({ error: 'Failed to delete video' });
+  }
 });
 
 // Vendor settings
