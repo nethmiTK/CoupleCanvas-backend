@@ -19,10 +19,11 @@ const templateCategoriesRoutes = require('./template_categories');
 const albumAdminRoutes = require('./AlbumAdminRoutes');
 const albumVendorsRoutes = require('./album_vendors');
 const vendorAlbumRoutes = require('./VendorAlbumRoutes/vendoralbum');
+const marriageProposalRoutes = require('./marriage_proposal');
 
 // Health check
-router.get('/', (req, res) => res.json({ 
-  ok: true, 
+router.get('/', (req, res) => res.json({
+  ok: true,
   message: 'CoupleCanvas Backend API',
   version: '1.0.0',
   timestamp: new Date()
@@ -32,8 +33,8 @@ router.get('/', (req, res) => res.json({
 router.get('/test-db', async (req, res) => {
   const db = getDb();
   const collections = await db.listCollections().toArray();
-  res.json({ 
-    connected: true, 
+  res.json({
+    connected: true,
     database: db.databaseName,
     collections: collections.map(c => c.name)
   });
@@ -64,5 +65,8 @@ router.use('/vendor-album', vendorAlbumRoutes);
 
 // Album Vendors Routes
 router.use('/album-vendors', albumVendorsRoutes);
+
+// Marriage Proposals Routes
+router.use('/marriage-proposals', marriageProposalRoutes);
 
 module.exports = router;
