@@ -146,11 +146,13 @@ const getPublicProposals = async (req, res) => {
 
     if (gender) filter['publicInfo.gender'] = gender;
     if (birthYear) filter['publicInfo.birthYear'] = parseInt(birthYear);
+    if (req.query.age) filter['publicInfo.birthYear'] = new Date().getFullYear() - parseInt(req.query.age);
     if (status) filter['publicInfo.status'] = status;
     if (country) filter['publicInfo.residentCountry'] = country;
     if (province) filter['publicInfo.residentProvince'] = province;
-    if (district) filter['publicInfo.residentDistrict'] = district;
+    if (district) filter['publicInfo.residentDistrict'] = { $regex: district, $options: 'i' };
     if (town) filter['publicInfo.residentTown'] = town;
+    if (req.query.profession) filter['publicInfo.profession'] = { $regex: req.query.profession, $options: 'i' };
 
     const proposals = await db.collection('marriage_proposals')
       .find(filter)
@@ -159,6 +161,8 @@ const getPublicProposals = async (req, res) => {
         publicInfo: 1,
         createdAt: 1,
         views: 1,
+        hearts: 1,
+        albumDesign: 1,
       })
       .sort({ createdAt: -1 })
       .toArray();
@@ -180,7 +184,17 @@ const updateProposal = async (req, res) => {
       return res.status(400).json({ error: 'Proposal ID is required' });
     }
 
-    const update = { $set: { ...updateData, updatedAt: new Date() } };
+    const update = { $set: { updatedAt: new Date() } };
+
+    // Separate regular fields for $set and operators like $inc
+    Object.keys(updateData).forEach(key => {
+      if (key.startsWith('$')) {
+        update[key] = updateData[key];
+      } else {
+        update.$set[key] = updateData[key];
+      }
+    });
+
     if (adStatus) update.$set.adStatus = adStatus;
 
     const result = await db.collection('marriage_proposals').updateOne(
@@ -416,10 +430,41 @@ const deleteProposal = async (req, res) => {
   }
 };
 
+// Admin: Get all proposals
+const getAllProposalsAdmin = async (req, res) => {
+  const db = getDb();
+  try {
+    const { status, approvalStatus, search } = req.query;
+
+    const filter = {};
+    if (status && status !== 'all') filter.adStatus = status;
+    if (approvalStatus && approvalStatus !== 'all') filter.approvalStatus = approvalStatus;
+
+    if (search) {
+      filter.$or = [
+        { adCode: { $regex: search, $options: 'i' } },
+        { 'privateInfo.firstName': { $regex: search, $options: 'i' } },
+        { 'privateInfo.lastName': { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const proposals = await db.collection('marriage_proposals')
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json({ success: true, proposals });
+  } catch (error) {
+    console.error('Error fetching all proposals:', error);
+    res.status(500).json({ error: 'Failed to fetch proposals' });
+  }
+};
+
 module.exports = {
   createProposal,
   getVendorProposals,
   getPublicProposals,
+  getAllProposalsAdmin,
   updateProposal,
   deleteProposal,
   getVendorStats,

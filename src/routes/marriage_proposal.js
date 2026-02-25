@@ -4,6 +4,7 @@ const {
     createProposal,
     getVendorProposals,
     getPublicProposals,
+    getAllProposalsAdmin,
     updateProposal,
     deleteProposal,
     getVendorStats,
@@ -16,6 +17,7 @@ const {
 router.post('/create', createProposal);
 router.get('/vendor', getVendorProposals);
 router.get('/public', getPublicProposals);
+router.get('/admin/all', getAllProposalsAdmin);
 router.put('/update', updateProposal);
 router.delete('/delete', deleteProposal);
 router.get('/stats', getVendorStats);

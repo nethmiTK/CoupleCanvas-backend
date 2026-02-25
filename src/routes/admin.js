@@ -13,6 +13,82 @@ router.get('/all', async (req, res) => {
   res.json({ admins });
 });
 
+// Admin: Get specific vendor details (Subscription, Profile, Stats)
+router.get('/vendor-detail/:id', async (req, res) => {
+  const db = getDb();
+  try {
+    const { id } = req.params;
+    const { type } = req.query; // 'album' or 'proposal'
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid ID' });
+    }
+
+    let profile = null;
+    let counts = { albums: 0, ads: 0 };
+    let actualVendorId = id;
+
+    if (type === 'album') {
+      profile = await db.collection('album_vendors').findOne({
+        $or: [{ _id: new ObjectId(id) }, { vendor_id: new ObjectId(id) }]
+      });
+      if (profile) actualVendorId = profile.vendor_id || profile._id;
+      counts.albums = await db.collection('albums').countDocuments({ vendor_id: new ObjectId(actualVendorId) });
+    } else {
+      profile = await db.collection('marriage_proposals').findOne({
+        $or: [{ _id: new ObjectId(id) }, { vendorId: new ObjectId(id) }]
+      });
+      if (profile) actualVendorId = profile.vendorId || profile._id;
+
+      if (profile && profile.vendorId) {
+        const vid = typeof profile.vendorId === 'string' ? new ObjectId(profile.vendorId) : profile.vendorId;
+        counts.ads = await db.collection('marriage_proposals').countDocuments({ vendorId: vid });
+      } else {
+        counts.ads = 1;
+      }
+    }
+
+    const subVendorId = actualVendorId || id;
+
+    // Get latest subscription with plan details
+    const subscription = await db.collection('vendor_subscriptions').aggregate([
+      { $match: { vendorId: new ObjectId(subVendorId), vendorType: type } },
+      { $sort: { createdAt: -1 } },
+      { $limit: 1 },
+      {
+        $addFields: {
+          planObjectId: {
+            $cond: {
+              if: { $and: [{ $ne: ["$planId", null] }, { $ne: ["$planId", ""] }] },
+              then: { $toObjectId: "$planId" },
+              else: null
+            }
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: 'sub_plan',
+          localField: 'planObjectId',
+          foreignField: '_id',
+          as: 'planDetails'
+        }
+      },
+      { $unwind: { path: '$planDetails', preserveNullAndEmptyArrays: true } }
+    ]).toArray();
+
+    res.json({
+      success: true,
+      profile,
+      counts,
+      subscription: subscription.length > 0 ? subscription[0] : null
+    });
+  } catch (err) {
+    console.error('Vendor detail error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ...existing code...
 
 // (Move this route to the end of the file)
@@ -69,7 +145,7 @@ router.post('/signup', async (req, res) => {
 // Get pending vendors for approval
 router.get('/approve', async (req, res) => {
   const db = getDb();
-  
+
   const vendors = await db.collection('vendor_profiles').aggregate([
     { $match: { approval_status: 'pending' } },
     {
@@ -91,7 +167,7 @@ router.get('/approve', async (req, res) => {
     { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
     { $sort: { created_at: 1 } }
   ]).toArray();
-  
+
   res.json({ vendors });
 });
 
@@ -99,28 +175,28 @@ router.get('/approve', async (req, res) => {
 router.post('/approve', async (req, res) => {
   const db = getDb();
   const { vendor_id, status, admin_remarks, admin_id } = req.body;
-  
+
   if (!vendor_id || !status) {
     return res.status(400).json({ error: 'vendor_id and status are required' });
   }
-  
+
   if (!['approved', 'rejected'].includes(status)) {
     return res.status(400).json({ error: 'status must be approved or rejected' });
   }
-  
+
   // Update vendor profile
   await db.collection('vendor_profiles').updateOne(
     { _id: new ObjectId(vendor_id) },
-    { 
-      $set: { 
+    {
+      $set: {
         approval_status: status,
         admin_remarks: admin_remarks || '',
         approved_at: status === 'approved' ? new Date() : null,
         updated_at: new Date()
-      } 
+      }
     }
   );
-  
+
   // Log the approval action
   await db.collection('admin_approval_log').insertOne({
     vendor_id: new ObjectId(vendor_id),
@@ -129,7 +205,7 @@ router.post('/approve', async (req, res) => {
     remarks: admin_remarks || '',
     created_at: new Date()
   });
-  
+
   res.json({ message: `Vendor ${status} successfully` });
 });
 
@@ -179,14 +255,14 @@ router.get('/stats', async (req, res) => {
 // Cleanup expired profiles
 router.get('/cleanup/expired-profiles', async (req, res) => {
   const db = getDb();
-  
+
   const result = await db.collection('vendor_profiles').deleteMany({
     expire_date: { $lt: new Date() }
   });
-  
-  res.json({ 
+
+  res.json({
     message: 'Expired profiles cleaned up',
-    deletedCount: result.deletedCount 
+    deletedCount: result.deletedCount
   });
 });
 
@@ -316,20 +392,20 @@ router.delete('/service-categories/:id', async (req, res) => {
 router.post('/login', async (req, res) => {
   const db = getDb();
   const { email, password } = req.body;
-  
+
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
   try {
     const admin = await db.collection('admin').findOne({ email });
-    
+
     if (!admin) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     const passwordMatch = await bcrypt.compare(password, admin.password);
-    
+
     if (!passwordMatch) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
