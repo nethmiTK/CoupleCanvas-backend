@@ -35,24 +35,28 @@ router.get('/vendor-detail/:id', async (req, res) => {
       if (profile) actualVendorId = profile.vendor_id || profile._id;
       counts.albums = await db.collection('albums').countDocuments({ vendor_id: new ObjectId(actualVendorId) });
     } else {
-      profile = await db.collection('marriage_proposals').findOne({
-        $or: [{ _id: new ObjectId(id) }, { vendorId: new ObjectId(id) }]
+      // Fetch from proposal_vendors (the admin-managed vendor registry)
+      profile = await db.collection('proposal_vendors').findOne({
+        $or: [{ _id: new ObjectId(id) }, { vendor_id: new ObjectId(id) }]
       });
-      if (profile) actualVendorId = profile.vendorId || profile._id;
-
-      if (profile && profile.vendorId) {
-        const vid = typeof profile.vendorId === 'string' ? new ObjectId(profile.vendorId) : profile.vendorId;
-        counts.ads = await db.collection('marriage_proposals').countDocuments({ vendorId: vid });
-      } else {
-        counts.ads = 1;
+      if (profile) {
+        actualVendorId = profile._id;
+        counts.ads = await db.collection('marriage_proposals').countDocuments({
+          vendorId: profile._id
+        });
+        if (counts.ads === 0) counts.ads = 0;
       }
     }
 
-    const subVendorId = actualVendorId || id;
+    const vIdMatches = [new ObjectId(id)];
+    if (profile) {
+      if (profile._id) vIdMatches.push(new ObjectId(profile._id));
+      if (profile.vendor_id) vIdMatches.push(new ObjectId(profile.vendor_id));
+    }
 
     // Get latest subscription with plan details
     const subscription = await db.collection('vendor_subscriptions').aggregate([
-      { $match: { vendorId: new ObjectId(subVendorId), vendorType: type } },
+      { $match: { vendorId: { $in: vIdMatches }, vendorType: type } },
       { $sort: { createdAt: -1 } },
       { $limit: 1 },
       {
@@ -77,11 +81,28 @@ router.get('/vendor-detail/:id', async (req, res) => {
       { $unwind: { path: '$planDetails', preserveNullAndEmptyArrays: true } }
     ]).toArray();
 
+    // Fetch vendor login credentials from vendors collection
+    let vendorCredentials = null;
+    if (profile && profile.vendor_id) {
+      const vendor = await db.collection('vendors').findOne(
+        { _id: new ObjectId(profile.vendor_id) },
+        { projection: { email: 1, username: 1, plainPassword: 1 } }
+      );
+      if (vendor) {
+        vendorCredentials = {
+          email: vendor.email,
+          username: vendor.username,
+          plainPassword: vendor.plainPassword || null,
+        };
+      }
+    }
+
     res.json({
       success: true,
       profile,
       counts,
-      subscription: subscription.length > 0 ? subscription[0] : null
+      subscription: subscription.length > 0 ? subscription[0] : null,
+      vendorCredentials,
     });
   } catch (err) {
     console.error('Vendor detail error:', err);
@@ -207,6 +228,146 @@ router.post('/approve', async (req, res) => {
   });
 
   res.json({ message: `Vendor ${status} successfully` });
+});
+
+// Get proposal vendors
+router.get('/proposal-vendors', async (req, res) => {
+  const db = getDb();
+  try {
+    const { status, search } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const matchFilter = {};
+    if (status && status !== 'all') {
+      matchFilter.status = status;
+    }
+
+    if (search) {
+      matchFilter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { whatsappNo: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const totalVendors = await db.collection('proposal_vendors').countDocuments(matchFilter);
+
+    const vendors = await db.collection('proposal_vendors').aggregate([
+      { $match: matchFilter },
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: 'vendor_subscriptions',
+          let: { vId: '$_id', vIdField: '$vendor_id' },
+          pipeline: [
+            {
+              $match: {
+                $and: [
+                  {
+                    $or: [
+                      { $expr: { $eq: ['$vendorId', '$$vId'] } },
+                      { $expr: { $and: [{ $ne: ['$$vIdField', null] }, { $eq: ['$vendorId', '$$vIdField'] }] } }
+                    ]
+                  },
+                  { vendorType: 'proposal' }
+                ]
+              }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            { $project: { paymentSlip: 1, planName: 1, amount: 1 } }
+          ],
+          as: 'latestSubscription'
+        }
+      },
+      {
+        $addFields: {
+          slipPhoto: {
+            $cond: {
+              if: { $and: [{ $gt: [{ $size: '$latestSubscription' }, 0] }, { $arrayElemAt: ['$latestSubscription.paymentSlip', 0] }] },
+              then: { $arrayElemAt: ['$latestSubscription.paymentSlip', 0] },
+              else: '$slipPhoto' // Fallback to profile slipPhoto if sub has none
+            }
+          },
+          planName: { $arrayElemAt: ['$latestSubscription.planName', 0] },
+          planAmount: { $arrayElemAt: ['$latestSubscription.amount', 0] }
+        }
+      },
+      { $project: { latestSubscription: 0 } }
+    ]).toArray();
+
+    res.json({
+      success: true,
+      vendors,
+      pagination: {
+        total: totalVendors,
+        page,
+        limit,
+        pages: Math.ceil(totalVendors / limit)
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching proposal vendors:', err);
+    res.status(500).json({ error: 'Failed to fetch proposal vendors' });
+  }
+});
+
+// Update proposal vendor status
+router.patch('/proposal-vendors/:id/status', async (req, res) => {
+  const db = getDb();
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    await db.collection('proposal_vendors').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+
+    // If active, also update the latest pending subscription to active
+    if (status === 'active') {
+      const vendor = await db.collection('proposal_vendors').findOne({ _id: new ObjectId(id) });
+      const vIdMatches = [new ObjectId(id)];
+      if (vendor?.vendor_id) vIdMatches.push(new ObjectId(vendor.vendor_id));
+
+      await db.collection('vendor_subscriptions').updateOne(
+        {
+          vendorId: { $in: vIdMatches },
+          vendorType: 'proposal',
+          status: 'pending'
+        },
+        { $set: { status: 'active', updatedAt: new Date() } },
+        { sort: { createdAt: -1 } }
+      );
+    }
+
+    res.json({ success: true, message: `Vendor ${status}` });
+  } catch (err) {
+    console.error('Error updating proposal vendor:', err);
+    res.status(500).json({ error: 'Failed to update vendor status' });
+  }
+});
+
+// Delete proposal vendor
+router.delete('/proposal-vendors/:id', async (req, res) => {
+  const db = getDb();
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid vendor id' });
+
+    const result = await db.collection('proposal_vendors').deleteOne({ _id: new ObjectId(id) });
+    if (result.deletedCount === 0) return res.status(404).json({ error: 'Proposal vendor not found' });
+
+    // Optionally remove related resources here (uploads, logs)
+
+    res.json({ success: true, message: 'Proposal vendor deleted' });
+  } catch (err) {
+    console.error('Error deleting proposal vendor:', err);
+    res.status(500).json({ error: 'Failed to delete proposal vendor' });
+  }
 });
 
 // Get statistics

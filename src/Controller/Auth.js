@@ -44,6 +44,7 @@ const registerVendor = async (req, res) => {
       email,
       username,
       password: hashedPassword,
+      plainPassword: password,
       address,
       birthdate,
       sex,
@@ -174,7 +175,9 @@ const loginVendor = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Login error:', error);
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Login error:', error);
+    }
     res.status(500).json({ error: error.message || 'Login failed' });
   }
 };

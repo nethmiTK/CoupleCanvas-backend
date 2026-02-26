@@ -8,27 +8,67 @@ router.get('/', async (req, res) => {
   try {
     const db = getDb();
     const { status, search } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    const filter = {};
+    const matchFilter = { _init: { $exists: false } };
 
     if (status && status !== 'all') {
-      filter.status = status;
+      matchFilter.status = status;
     }
 
     if (search) {
-      filter.$or = [
+      matchFilter.$or = [
         { name: { $regex: search, $options: 'i' } },
         { whatsappNo: { $regex: search, $options: 'i' } },
       ];
     }
 
-    const vendors = await db
-      .collection('album_vendors')
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .toArray();
+    const totalVendors = await db.collection('album_vendors').countDocuments(matchFilter);
 
-    res.json({ success: true, vendors, count: vendors.length });
+    const vendors = await db.collection('album_vendors').aggregate([
+      { $match: matchFilter },
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: 'vendor_subscriptions',
+          let: { vendorId: '$vendor_id' }, // use vendor_id for album vendors as it links to 'vendors' collection used in sub
+          pipeline: [
+            { $match: { $expr: { $eq: ['$vendorId', '$$vendorId'] }, vendorType: 'album' } },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            { $project: { paymentSlip: 1 } }
+          ],
+          as: 'latestSubscription'
+        }
+      },
+      {
+        $addFields: {
+          slipPhoto: {
+            $cond: {
+              if: { $gt: [{ $size: '$latestSubscription' }, 0] },
+              then: { $arrayElemAt: ['$latestSubscription.paymentSlip', 0] },
+              else: null
+            }
+          }
+        }
+      },
+      { $project: { latestSubscription: 0 } }
+    ]).toArray();
+
+    res.json({
+      success: true,
+      vendors,
+      pagination: {
+        total: totalVendors,
+        page,
+        limit,
+        pages: Math.ceil(totalVendors / limit)
+      }
+    });
   } catch (error) {
     console.error('Error fetching album vendors:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch album vendors' });
@@ -75,6 +115,18 @@ router.patch('/:id/status', async (req, res) => {
       { returnDocument: 'after' }
     );
 
+    if (status === 'active') {
+      // Find the actual vendor doc (to get vendor_id if different)
+      const vendor = await db.collection('album_vendors').findOne({ _id: new ObjectId(id) });
+      const searchId = vendor?.vendor_id || new ObjectId(id);
+
+      await db.collection('vendor_subscriptions').updateOne(
+        { vendorId: new ObjectId(searchId), vendorType: 'album', status: 'pending' },
+        { $set: { status: 'active', updatedAt: new Date() } },
+        { sort: { createdAt: -1 } }
+      );
+    }
+
     if (!result) {
       return res.status(404).json({ success: false, error: 'Album vendor not found' });
     }
@@ -83,6 +135,29 @@ router.patch('/:id/status', async (req, res) => {
   } catch (error) {
     console.error('Error updating vendor status:', error);
     res.status(500).json({ success: false, error: 'Failed to update vendor status' });
+  }
+});
+
+// DELETE /api/album-vendors/:id - Delete album vendor
+router.delete('/:id', async (req, res) => {
+  try {
+    const db = getDb();
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, error: 'Invalid vendor ID' });
+    }
+
+    const result = await db.collection('album_vendors').deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, error: 'Album vendor not found' });
+    }
+
+    res.json({ success: true, message: 'Album vendor deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting album vendor:', error);
+    res.status(500).json({ success: false, error: 'Failed to delete album vendor' });
   }
 });
 

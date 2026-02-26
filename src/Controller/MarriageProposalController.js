@@ -43,6 +43,8 @@ const createProposal = async (req, res) => {
       language, // 'english' or 'sinhala'
       generatedDescription,
       password,
+      adImage,
+      albumTheme,
     } = req.body;
 
     // Validation
@@ -88,7 +90,8 @@ const createProposal = async (req, res) => {
         language,
         generatedDescription,
       },
-
+      adImage,
+      albumDesign: albumTheme || 'romantic',
       password, // Store hashed in production
       approvalStatus: 'approved', // Vendors' proposals are auto-approved
       adStatus: 'active', // Start as active instead of draft
@@ -163,6 +166,7 @@ const getPublicProposals = async (req, res) => {
         views: 1,
         hearts: 1,
         albumDesign: 1,
+        adImage: 1,
       })
       .sort({ createdAt: -1 })
       .toArray();

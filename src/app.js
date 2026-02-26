@@ -24,8 +24,10 @@ app.use(helmet({
 }));
 app.use(cors());
 app.use(express.json());
-app.use(morgan('dev'));
-
+// Use morgan only in development mode
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+}
 
 // Serve uploaded images statically
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
