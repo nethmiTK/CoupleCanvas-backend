@@ -157,19 +157,46 @@ const getPublicProposals = async (req, res) => {
     if (town) filter['publicInfo.residentTown'] = town;
     if (req.query.profession) filter['publicInfo.profession'] = { $regex: req.query.profession, $options: 'i' };
 
-    const proposals = await db.collection('marriage_proposals')
-      .find(filter)
-      .project({
-        adCode: 1,
-        publicInfo: 1,
-        createdAt: 1,
-        views: 1,
-        hearts: 1,
-        albumDesign: 1,
-        adImage: 1,
-      })
-      .sort({ createdAt: -1 })
-      .toArray();
+    const proposals = await db.collection('marriage_proposals').aggregate([
+      { $match: filter },
+      {
+        $lookup: {
+          from: 'proposal_vendors',
+          let: { vId: "$vendorId" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$_id", "$$vId"] },
+                    { $eq: ["$vendor_id", "$$vId"] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: 'vendor'
+        }
+      },
+      { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          'vendor.status': 'active'
+        }
+      },
+      {
+        $project: {
+          adCode: 1,
+          publicInfo: 1,
+          createdAt: 1,
+          views: 1,
+          hearts: 1,
+          albumDesign: 1,
+          adImage: 1,
+        }
+      },
+      { $sort: { createdAt: -1 } }
+    ]).toArray();
 
     res.json({ success: true, proposals });
   } catch (error) {

@@ -148,13 +148,36 @@ router.delete('/:id', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid vendor ID' });
     }
 
-    const result = await db.collection('album_vendors').deleteOne({ _id: new ObjectId(id) });
-
-    if (result.deletedCount === 0) {
+    // Find the vendor doc first
+    const vendor = await db.collection('album_vendors').findOne({ _id: new ObjectId(id) });
+    if (!vendor) {
       return res.status(404).json({ success: false, error: 'Album vendor not found' });
     }
 
-    res.json({ success: true, message: 'Album vendor deleted successfully' });
+    const vendor_id = vendor.vendor_id;
+
+    // 1. Delete from album_vendors
+    await db.collection('album_vendors').deleteOne({ _id: new ObjectId(id) });
+
+    // 2. Delete related records if vendor_id exists
+    if (vendor_id) {
+      const vObjectId = new ObjectId(vendor_id);
+
+      // Delete from main vendors collection
+      await db.collection('vendors').deleteOne({ _id: vObjectId });
+
+      // Delete subscriptions
+      await db.collection('vendor_subscriptions').deleteMany({
+        vendorId: { $in: [vObjectId, new ObjectId(id)] }
+      });
+
+      // Delete albums created by this vendor
+      await db.collection('albums').deleteMany({
+        vendor_id: { $in: [vObjectId, new ObjectId(id)] }
+      });
+    }
+
+    res.json({ success: true, message: 'Album vendor and all related records deleted successfully' });
   } catch (error) {
     console.error('Error deleting album vendor:', error);
     res.status(500).json({ success: false, error: 'Failed to delete album vendor' });

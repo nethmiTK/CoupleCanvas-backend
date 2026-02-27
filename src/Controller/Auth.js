@@ -267,6 +267,69 @@ const customerLogout = (req, res) => {
   res.json({ message: 'Customer logged out successfully' });
 };
 
+// Update Vendor Profile
+const updateVendorProfile = async (req, res) => {
+  const db = getDb();
+  try {
+    const { vendorId, name, phone } = req.body;
+    if (!vendorId) return res.status(400).json({ error: 'Vendor ID is required' });
+
+    const updateData = { updatedAt: new Date() };
+    if (name) updateData.username = name;
+    if (phone) updateData.phone = phone;
+
+    const result = await db.collection('vendors').updateOne(
+      { _id: new ObjectId(vendorId) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Vendor not found' });
+    }
+
+    res.json({ success: true, message: 'Profile updated successfully' });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Change Vendor Password
+const changeVendorPassword = async (req, res) => {
+  const db = getDb();
+  try {
+    const { vendorId, currentPassword, newPassword } = req.body;
+    if (!vendorId || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    const vendor = await db.collection('vendors').findOne({ _id: new ObjectId(vendorId) });
+    if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
+
+    const validPassword = await bcrypt.compare(currentPassword, vendor.password);
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Invalid current password' });
+    }
+
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+    await db.collection('vendors').updateOne(
+      { _id: new ObjectId(vendorId) },
+      {
+        $set: {
+          password: hashedNewPassword,
+          plainPassword: newPassword, // Keep for legacy/admin view
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   registerVendor,
   loginVendor,
@@ -274,4 +337,6 @@ module.exports = {
   loginCustomer,
   logout,
   customerLogout,
+  updateVendorProfile,
+  changeVendorPassword,
 };

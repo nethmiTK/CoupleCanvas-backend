@@ -17,12 +17,28 @@ router.get('/', async (req, res) => {
       {
         $lookup: {
           from: 'album_vendors',
-          localField: 'vendor_id',
-          foreignField: '_id',
+          let: { vId: "$vendor_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    { $eq: ["$_id", "$$vId"] },
+                    { $eq: ["$vendor_id", "$$vId"] }
+                  ]
+                }
+              }
+            }
+          ],
           as: 'vendor'
         }
       },
       { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
+      {
+        $match: {
+          'vendor.status': 'active'
+        }
+      },
       {
         $lookup: {
           from: 'album_templates',

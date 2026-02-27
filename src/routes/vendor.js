@@ -601,7 +601,7 @@ router.post('/settings', async (req, res) => {
 router.post('/subscribe', async (req, res) => {
   const db = getDb();
   try {
-    const { vendorId, vendorType, planId, planName, amount, paymentSlip, status } = req.body;
+    const { vendorId, vendorType, planId, planName, planDuration, amount, paymentSlip, status } = req.body;
 
     if (!vendorId || !vendorType || !planName) {
       return res.status(400).json({ error: 'vendorId, vendorType, and planName are required' });
@@ -612,6 +612,7 @@ router.post('/subscribe', async (req, res) => {
       vendorType,
       planId,
       planName,
+      planDuration: planDuration || 30, // Default to 30 if not specified
       amount: amount || 0,
       paymentSlip: paymentSlip || null,
       status: status || 'pending',
@@ -664,10 +665,36 @@ router.get('/subscription/:vendorId', async (req, res) => {
     const query = { vendorId: new ObjectId(vendorId) };
     if (vendorType) query.vendorType = vendorType;
 
-    const subscriptions = await db.collection('vendor_subscriptions')
-      .find(query)
-      .sort({ createdAt: -1 })
-      .toArray();
+    const subscriptions = await db.collection('vendor_subscriptions').aggregate([
+      { $match: query },
+      { $sort: { createdAt: -1 } },
+      {
+        $addFields: {
+          planObjectId: {
+            $cond: {
+              if: { $and: [{ $ne: ["$planId", null] }, { $ne: ["$planId", ""] }] },
+              then: { $toObjectId: "$planId" },
+              else: null
+            }
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: 'sub_plan',
+          localField: 'planObjectId',
+          foreignField: '_id',
+          as: 'planDetails'
+        }
+      },
+      { $unwind: { path: '$planDetails', preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          planDuration: { $ifNull: ["$planDuration", "$planDetails.duration", 30] }
+        }
+      },
+      { $project: { planDetails: 0, planObjectId: 0 } }
+    ]).toArray();
 
     res.json({ subscriptions });
   } catch (error) {

@@ -97,12 +97,18 @@ router.get('/vendor-detail/:id', async (req, res) => {
       }
     }
 
+    // Fetch vendor contact messages
+    const messages = await db.collection('contacts').find({
+      vendor_id: { $in: vIdMatches }
+    }).sort({ created_at: -1 }).limit(10).toArray();
+
     res.json({
       success: true,
       profile,
       counts,
       subscription: subscription.length > 0 ? subscription[0] : null,
       vendorCredentials,
+      messages
     });
   } catch (err) {
     console.error('Vendor detail error:', err);
@@ -358,12 +364,34 @@ router.delete('/proposal-vendors/:id', async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid vendor id' });
 
-    const result = await db.collection('proposal_vendors').deleteOne({ _id: new ObjectId(id) });
-    if (result.deletedCount === 0) return res.status(404).json({ error: 'Proposal vendor not found' });
+    // Find the vendor first to get the vendor_id (link to vendors table)
+    const vendor = await db.collection('proposal_vendors').findOne({ _id: new ObjectId(id) });
+    if (!vendor) return res.status(404).json({ error: 'Proposal vendor not found' });
 
-    // Optionally remove related resources here (uploads, logs)
+    const vendor_id = vendor.vendor_id;
 
-    res.json({ success: true, message: 'Proposal vendor deleted' });
+    // 1. Delete from proposal_vendors
+    await db.collection('proposal_vendors').deleteOne({ _id: new ObjectId(id) });
+
+    // 2. Delete related records if vendor_id exists
+    if (vendor_id) {
+      const vObjectId = new ObjectId(vendor_id);
+
+      // Delete from main vendors collection
+      await db.collection('vendors').deleteOne({ _id: vObjectId });
+
+      // Delete subscriptions
+      await db.collection('vendor_subscriptions').deleteMany({
+        vendorId: { $in: [vObjectId, new ObjectId(id)] }
+      });
+
+      // Delete marriage proposals created by this vendor
+      await db.collection('marriage_proposals').deleteMany({
+        $or: [{ vendorId: vObjectId }, { vendorId: new ObjectId(id) }]
+      });
+    }
+
+    res.json({ success: true, message: 'Proposal vendor and all related records deleted' });
   } catch (err) {
     console.error('Error deleting proposal vendor:', err);
     res.status(500).json({ error: 'Failed to delete proposal vendor' });

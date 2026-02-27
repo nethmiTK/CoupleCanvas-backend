@@ -22,6 +22,9 @@ router.get('/', async (req, res) => {
             subscriptionRevenue,
             revenueBreakdown,
             recentSubscriptions,
+            contactCount,
+            newContactsCount,
+            recentContacts,
         ] = await Promise.all([
             db.collection('albums').countDocuments(),
             db.collection('marriage_proposals').countDocuments(),
@@ -81,7 +84,10 @@ router.get('/', async (req, res) => {
                     }
                 },
                 { $project: { albumVendorProfile: 0, proposalVendorProfile: 0 } }
-            ]).toArray()
+            ]).toArray(),
+            db.collection('contacts').countDocuments(),
+            db.collection('contacts').countDocuments({ status: 'new' }),
+            db.collection('contacts').find().sort({ created_at: -1 }).limit(10).toArray()
         ]);
 
         // Transform revenue breakdown into a better format
@@ -128,6 +134,9 @@ router.get('/', async (req, res) => {
                 revenueBreakdown: breakdown,
                 recentSubscriptions,
                 monthlyRevenue,
+                contacts: contactCount || 0,
+                newContacts: newContactsCount || 0,
+                recentContacts,
             }
         });
     } catch (err) {
