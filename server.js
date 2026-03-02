@@ -2,7 +2,26 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-app.use(cors());
+const allowedOrigins = [
+  'http://memoalbum.com',
+  'http://www.memoalbum.com',
+  'https://memoalbum.com',
+  'https://www.memoalbum.com',
+  'https://admin.memoalbum.com',
+  'http://admin.memoalbum.com'
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 const admins = [
