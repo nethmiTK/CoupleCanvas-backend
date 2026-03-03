@@ -49,6 +49,6 @@ app.post('/api/admin/signup', (req, res) => {
   res.json({ message: 'Admin created successfully' });
 });
 
-app.listen(5000, () => {
-  console.log('Backend running on http://localhost:5000');
+app.listen(5000, '0.0.0.0', () => {
+  console.log('Backend running');
 });
