@@ -3,6 +3,10 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
+const statsRoutes = require('./routes/stats');
+const albumRoutes = require('./routes/albums');
+const videoRoutes = require('./routes/videos');
+
 const allowedOrigins = [
   'http://memoalbum.com',
   'http://www.memoalbum.com',
@@ -24,6 +28,10 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+app.use('/api', statsRoutes);
+app.use('/api', albumRoutes);
+app.use('/api', videoRoutes);
 
 const admins = [
   { id: '1', email: 'admin@couplecanvas.com', password: 'admin123', name: 'Admin User' }
