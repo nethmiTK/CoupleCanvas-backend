@@ -1,9 +1,7 @@
 const { getDb } = require('../../db/mongo');
 const { ObjectId } = require('mongodb');
 
-// ======================== ALBUM TEMPLATES ========================
-
-// Get all album templates (system-wide for selection)
+ 
 const getAllAlbumTemplates = async (req, res) => {
   const db = getDb();
   try {
@@ -14,8 +12,7 @@ const getAllAlbumTemplates = async (req, res) => {
       query.category = category;
     }
 
-    // If vendor_id provided, get vendor-specific templates
-    if (vendor_id) {
+     if (vendor_id) {
       query.vendor_id = vendor_id;
     }
 
@@ -31,8 +28,7 @@ const getAllAlbumTemplates = async (req, res) => {
   }
 };
 
-// Get template categories
-const getTemplateCategories = async (req, res) => {
+ const getTemplateCategories = async (req, res) => {
   const db = getDb();
   try {
     const categories = await db.collection('template_categories')
@@ -47,8 +43,7 @@ const getTemplateCategories = async (req, res) => {
   }
 };
 
-// Get single template by ID
-const getAlbumTemplateById = async (req, res) => {
+ const getAlbumTemplateById = async (req, res) => {
   const db = getDb();
   try {
     const { id } = req.params;
@@ -68,8 +63,7 @@ const getAlbumTemplateById = async (req, res) => {
   }
 };
 
-// Create a new album template
-const createAlbumTemplate = async (req, res) => {
+ const createAlbumTemplate = async (req, res) => {
   const db = getDb();
   try {
     const {
@@ -91,8 +85,7 @@ const createAlbumTemplate = async (req, res) => {
       return res.status(400).json({ error: 'name and category are required' });
     }
 
-    // Parse JSON strings if sent as strings
-    const parsedSlots = typeof slots === 'string' ? JSON.parse(slots) : (slots || []);
+     const parsedSlots = typeof slots === 'string' ? JSON.parse(slots) : (slots || []);
     const parsedBackground = typeof background === 'string' ? JSON.parse(background) : (background || { type: 'solid', value: '#ffffff' });
     const parsedDecorations = typeof decorations === 'string' ? JSON.parse(decorations) : (decorations || { type: 'none', positions: [] });
     const parsedColors = typeof colors === 'string' ? JSON.parse(colors) : (colors || { primary: '#E91E63', secondary: '#FCE4EC', accent: '#FF4081', text: '#880E4F' });
@@ -177,9 +170,7 @@ const deleteAlbumTemplate = async (req, res) => {
   }
 };
 
-// ======================== VENDOR ALBUMS ========================
-
-// Get vendor albums
+ 
 const getVendorAlbums = async (req, res) => {
   const db = getDb();
   try {
@@ -297,8 +288,7 @@ const createVendorAlbum = async (req, res) => {
   }
 };
 
-// Get single album by ID
-const getAlbumById = async (req, res) => {
+ const getAlbumById = async (req, res) => {
   const db = getDb();
   try {
     const { id } = req.params;
@@ -338,8 +328,7 @@ const getAlbumById = async (req, res) => {
   }
 };
 
-// Update vendor album (supports adding/removing images and reordering)
-const updateVendorAlbum = async (req, res) => {
+ const updateVendorAlbum = async (req, res) => {
   const db = getDb();
   try {
     const { id } = req.params;
@@ -353,25 +342,21 @@ const updateVendorAlbum = async (req, res) => {
       page_settings,
       pages,
       cover_page,
-      existing_images, // JSON string array of image paths to KEEP
-      image_order,     // JSON array: ["existing:/uploads/albums/x.jpg", "new", "existing:/uploads/albums/y.jpg", "new"]
+      existing_images,  
+      image_order,     
     } = req.body;
 
-    // Get current album
-    const currentAlbum = await db.collection('albums').findOne({ _id: new ObjectId(id) });
+     const currentAlbum = await db.collection('albums').findOne({ _id: new ObjectId(id) });
     if (!currentAlbum) {
       return res.status(404).json({ error: 'Album not found' });
     }
 
-    // Build updated images list respecting order
-    let updatedImages = [];
+     let updatedImages = [];
 
-    // req.files is now an object (from multer.fields)
-    const uploadedImageFiles = req.files && req.files['images'];
+     const uploadedImageFiles = req.files && req.files['images'];
 
     if (image_order) {
-      // New ordering system: interleave existing and new images in user-defined order
-      let order;
+       let order;
       try {
         order = typeof image_order === 'string' ? JSON.parse(image_order) : image_order;
       } catch (e) { order = null; }

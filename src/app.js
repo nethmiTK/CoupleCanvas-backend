@@ -30,13 +30,26 @@ const allowedOrigins = [
   'https://memoalbum.com',
   'https://www.memoalbum.com',
   'https://admin.memoalbum.com',
-  'http://admin.memoalbum.com'
+  'http://admin.memoalbum.com',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3001',
+  'http://localhost:3002',
+  'http://127.0.0.1:3002'
 ];
+
+const envAllowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+const mergedAllowedOrigins = [...new Set([...allowedOrigins, ...envAllowedOrigins])];
 
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true); // allow server-to-server, mobile apps, curl, etc.
-    if (allowedOrigins.includes(origin)) {
+    if (mergedAllowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
