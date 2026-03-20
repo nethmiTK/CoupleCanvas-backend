@@ -11,19 +11,7 @@ const { errorHandler, notFound } = require('./middleware/errorHandler');
 
 const app = express();
 
-// ---------------------- Security ----------------------
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      imgSrc: ["'self'", 'data:', 'blob:', '*'],
-      styleSrc: ["'self'", 'https:', "'unsafe-inline'"],
-    },
-  },
-}));
-
-// ---------------------- CORS ----------------------
+// ---------------------- CORS Configuration ----------------------
 const allowedOrigins = [
   'http://memoalbum.com',
   'http://www.memoalbum.com',
@@ -48,7 +36,7 @@ const mergedAllowedOrigins = [...new Set([...allowedOrigins, ...envAllowedOrigin
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // allow server-to-server, mobile apps, curl, etc.
+    if (!origin) return callback(null, true); 
     if (mergedAllowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -58,22 +46,31 @@ app.use(cors({
   credentials: true
 }));
 
-// ---------------------- Parsing & Logging ----------------------
+// ---------------------- Middleware ----------------------
 app.use(express.json());
 
-// Only use morgan in development
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:', 'blob:', '*'],
+      styleSrc: ["'self'", 'https:', "'unsafe-inline'"],
+    },
+  },
+}));
+
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-// ---------------------- Static files ----------------------
+// ---------------------- Static Files & Routes ----------------------
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
-
-// ---------------------- Routes ----------------------
 app.use('/api', routes);
 
-// ---------------------- Error handling ----------------------
+// ---------------------- Error Handling ----------------------
 app.use(notFound);
 app.use(errorHandler);
+
 
 module.exports = app;

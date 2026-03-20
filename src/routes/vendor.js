@@ -89,50 +89,59 @@ router.get('/profile/:vendor_id', async (req, res) => {
   const db = getDb();
   const { vendor_id } = req.params;
 
+  if (!ObjectId.isValid(vendor_id)) {
+    return res.status(400).json({ error: 'Invalid vendor_id' });
+  }
+
+  const vendorObjectId = new ObjectId(vendor_id);
+
   try {
-    // First try to find by vendor_profiles _id
-    let vendor = await db.collection('vendor_profiles').aggregate([
-      { $match: { _id: new ObjectId(vendor_id) } },
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'user_id',
-          foreignField: '_id',
-          as: 'user'
-        }
-      },
-      { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } }
-    ]).toArray();
+    // Legacy profile collection (if present)
+    const legacyProfile = await db.collection('vendor_profiles').findOne({
+      $or: [
+        { _id: vendorObjectId },
+        { vendor_id: vendorObjectId },
+        { vendor_id: vendor_id }
+      ]
+    });
 
-    if (vendor.length > 0) {
-      const v = vendor[0];
-      return res.json({
-        _id: v._id,
-        name: v.user?.name || v.business_name || '',
-        email: v.user?.email || '',
-        phone: v.user?.phone || v.phone || '',
-        address: v.address || '',
-        business_name: v.business_name || '',
-        business_type: v.vendor_type_id || '',
-        description: v.description || '',
-        profile_image: v.profile_image || v.user?.profile_image || '',
-        social_links: v.social_links || {},
-        created_at: v.created_at
-      });
-    }
+    // Main auth vendor record
+    const vendorAccount = await db.collection('vendors').findOne({ _id: vendorObjectId });
 
-    // If not found, return empty profile that can be created
-    res.json({
+    // Type-specific vendor details for phone/name/profile image
+    const [proposalVendor, albumVendor, serviceVendor, productVendor] = await Promise.all([
+      db.collection('proposal_vendors').findOne({
+        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+      }),
+      db.collection('album_vendors').findOne({
+        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+      }),
+      db.collection('service_vendors').findOne({
+        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+      }),
+      db.collection('product_vendors').findOne({
+        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+      })
+    ]);
+
+    const typedVendor = proposalVendor || albumVendor || serviceVendor || productVendor || null;
+    const typedName = typedVendor?.name || typedVendor?.companyName || '';
+    const typedPhone = typedVendor?.whatsappNo || '';
+    const typedImage = typedVendor?.profilePic || typedVendor?.logoPic || '';
+
+    return res.json({
       _id: vendor_id,
-      name: '',
-      email: '',
-      phone: '',
-      address: '',
-      business_name: '',
-      business_type: '',
-      description: '',
-      profile_image: '',
-      social_links: {},
+      name: typedName || vendorAccount?.username || vendorAccount?.name || legacyProfile?.business_name || '',
+      email: vendorAccount?.email || legacyProfile?.email || '',
+      phone: typedPhone || vendorAccount?.phone || legacyProfile?.phone || '',
+      whatsappNo: typedPhone || vendorAccount?.phone || legacyProfile?.phone || '',
+      address: legacyProfile?.address || vendorAccount?.address || '',
+      business_name: legacyProfile?.business_name || '',
+      business_type: legacyProfile?.vendor_type_id || '',
+      description: legacyProfile?.description || '',
+      profile_image: typedImage || legacyProfile?.profile_image || '',
+      social_links: legacyProfile?.social_links || {},
+      created_at: legacyProfile?.created_at || vendorAccount?.createdAt || null
     });
   } catch (err) {
     console.error('Error fetching vendor profile:', err);
@@ -166,10 +175,16 @@ router.put('/profile/:vendor_id', uploadProfileImage.single('profile_image'), as
     profile_image = `/uploads/profiles/${req.file.filename}`;
   }
 
+  if (!ObjectId.isValid(vendor_id)) {
+    return res.status(400).json({ error: 'Invalid vendor_id' });
+  }
+
+  const vendorObjectId = new ObjectId(vendor_id);
+
   try {
-    // Update or create vendor profile
-    const result = await db.collection('vendor_profiles').updateOne(
-      { _id: new ObjectId(vendor_id) },
+    // Keep legacy vendor_profiles in sync for old screens.
+    await db.collection('vendor_profiles').updateOne(
+      { _id: vendorObjectId },
       {
         $set: {
           business_name: business_name || '',
@@ -186,14 +201,48 @@ router.put('/profile/:vendor_id', uploadProfileImage.single('profile_image'), as
       { upsert: true }
     );
 
-    // Also update user if exists
-    const vendorProfile = await db.collection('vendor_profiles').findOne({ _id: new ObjectId(vendor_id) });
-    if (vendorProfile?.user_id) {
-      await db.collection('users').updateOne(
-        { _id: vendorProfile.user_id },
-        { $set: { name, phone, updated_at: new Date() } }
-      );
+    // Update main vendor auth/account record.
+    const vendorUpdate = { updatedAt: new Date() };
+    if (name) {
+      vendorUpdate.username = name;
+      vendorUpdate.name = name;
     }
+    if (phone !== undefined) {
+      vendorUpdate.phone = phone;
+    }
+    await db.collection('vendors').updateOne(
+      { _id: vendorObjectId },
+      { $set: vendorUpdate }
+    );
+
+    // Update type-specific vendor records used by admin/vendor flows.
+    const typeBaseUpdate = {
+      updatedAt: new Date()
+    };
+    if (name) {
+      typeBaseUpdate.name = name;
+      typeBaseUpdate.companyName = name;
+    }
+    if (phone !== undefined) {
+      typeBaseUpdate.whatsappNo = phone;
+      typeBaseUpdate.phone = phone;
+    }
+
+    if (profile_image) {
+      typeBaseUpdate.profilePic = profile_image;
+      typeBaseUpdate.logoPic = profile_image;
+    }
+
+    const typeFilter = {
+      $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+    };
+
+    await Promise.all([
+      db.collection('proposal_vendors').updateMany(typeFilter, { $set: typeBaseUpdate }),
+      db.collection('album_vendors').updateMany(typeFilter, { $set: typeBaseUpdate }),
+      db.collection('service_vendors').updateMany(typeFilter, { $set: typeBaseUpdate }),
+      db.collection('product_vendors').updateMany(typeFilter, { $set: typeBaseUpdate })
+    ]);
 
     res.json({ message: 'Profile updated successfully' });
   } catch (err) {
@@ -460,19 +509,39 @@ router.get('/video', async (req, res) => {
   const db = getDb();
   const { vendor_id } = req.query;
 
+  console.log(`📡 GET /vendor/video - vendor_id: ${vendor_id}`);
+
   if (!vendor_id) {
-    return res.status(400).json({ error: 'vendor_id is required', videos: [] });
+    const errorResponse = { error: 'vendor_id is required', videos: [] };
+    console.warn('⚠️ vendor_id missing:', errorResponse);
+    return res.status(400).json(errorResponse);
   }
 
   try {
-    const videos = await db.collection('vendor_video').find({
-      vendor_id: new ObjectId(vendor_id)
-    }).sort({ created_at: -1 }).toArray();
+    // Validate vendor_id format
+    let query = {};
+    if (ObjectId.isValid(vendor_id)) {
+      query = { vendor_id: new ObjectId(vendor_id) };
+      console.log(`✅ vendor_id is valid ObjectId`);
+    } else {
+      // If not a valid ObjectId, try to find by string
+      query = { vendor_id: vendor_id };
+      console.log(`⚠️ vendor_id is not ObjectId format, querying as string`);
+    }
 
+    console.log(`🔍 Querying collection with:`, JSON.stringify(query));
+    const videos = await db.collection('vendor_video').find(query).sort({ created_at: -1 }).toArray();
+    
+    console.log(`✅ Found ${videos.length} videos`);
     res.json({ videos });
   } catch (err) {
-    console.error('Error fetching videos:', err);
-    res.status(500).json({ error: 'Failed to fetch videos', videos: [] });
+    console.error('❌ Error fetching videos:', err.message);
+    const errorResponse = { 
+      error: `Failed to fetch videos: ${err.message}`, 
+      details: err.toString(),
+      videos: [] 
+    };
+    res.status(500).json(errorResponse);
   }
 });
 
@@ -501,8 +570,14 @@ router.post('/video', async (req, res) => {
   }
 
   try {
+    // Ensure vendor_id is properly formatted as ObjectId
+    let vendorObjectId = vendor_id;
+    if (ObjectId.isValid(vendor_id)) {
+      vendorObjectId = new ObjectId(vendor_id);
+    }
+
     const result = await db.collection('vendor_video').insertOne({
-      vendor_id: new ObjectId(vendor_id),
+      vendor_id: vendorObjectId,
       video_url,
       thumbnail: thumbnail || '',
       title,
@@ -517,7 +592,7 @@ router.post('/video', async (req, res) => {
     });
   } catch (err) {
     console.error('Error creating video:', err);
-    res.status(500).json({ error: 'Failed to create video' });
+    res.status(500).json({ error: `Failed to create video: ${err.message}` });
   }
 });
 
@@ -530,6 +605,11 @@ router.put('/video', async (req, res) => {
   }
 
   try {
+    // Validate video_id format
+    if (!ObjectId.isValid(video_id)) {
+      return res.status(400).json({ error: 'Invalid video_id format' });
+    }
+
     await db.collection('vendor_video').updateOne(
       { _id: new ObjectId(video_id) },
       { $set: { availability, updated_at: new Date() } }
@@ -538,7 +618,7 @@ router.put('/video', async (req, res) => {
     res.json({ message: 'Video updated successfully' });
   } catch (err) {
     console.error('Error updating video:', err);
-    res.status(500).json({ error: 'Failed to update video' });
+    res.status(500).json({ error: `Failed to update video: ${err.message}` });
   }
 });
 
@@ -551,14 +631,23 @@ router.delete('/video', async (req, res) => {
   }
 
   try {
-    await db.collection('vendor_video').deleteOne({
+    // Validate video_id format
+    if (!ObjectId.isValid(video_id)) {
+      return res.status(400).json({ error: 'Invalid video_id format' });
+    }
+
+    const result = await db.collection('vendor_video').deleteOne({
       _id: new ObjectId(video_id)
     });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Video not found' });
+    }
 
     res.json({ message: 'Video deleted successfully' });
   } catch (err) {
     console.error('Error deleting video:', err);
-    res.status(500).json({ error: 'Failed to delete video' });
+    res.status(500).json({ error: `Failed to delete video: ${err.message}` });
   }
 });
 
@@ -793,6 +882,20 @@ router.patch('/subscription/:id/status', async (req, res) => {
     console.error('Update subscription status error:', error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// Health check endpoint for debugging
+router.get('/health', (req, res) => {
+  const db = getDb();
+  const isDbConnected = db !== null && db !== undefined;
+  
+  res.json({
+    status: 'ok',
+    message: 'Vendor API is running',
+    database: isDbConnected ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
 });
 
 module.exports = router;

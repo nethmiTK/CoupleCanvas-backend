@@ -52,10 +52,29 @@ const createProposal = async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    if (!vendorId || !ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ error: 'Valid vendor ID is required' });
+    }
+
+    const vendorObjectId = new ObjectId(vendorId);
+
+    // Business rule: only one published (approved + active) ad per vendor.
+    const existingPublishedCount = await db.collection('marriage_proposals').countDocuments({
+      vendorId: vendorObjectId,
+      approvalStatus: 'approved',
+      adStatus: 'active',
+    });
+
+    if (existingPublishedCount > 0) {
+      return res.status(409).json({
+        error: 'Only one ad can be published at a time. Pause your current ad before creating a new one.',
+      });
+    }
+
     const adCode = generateAdCode();
 
     const proposal = {
-      vendorId: vendorId ? new ObjectId(vendorId) : null,
+      vendorId: vendorObjectId,
       adCode,
 
       // Section 01 - Private
@@ -180,11 +199,6 @@ const getPublicProposals = async (req, res) => {
       },
       { $unwind: { path: '$vendor', preserveNullAndEmptyArrays: true } },
       {
-        $match: {
-          'vendor.status': 'active'
-        }
-      },
-      {
         $project: {
           adCode: 1,
           publicInfo: 1,
@@ -205,6 +219,33 @@ const getPublicProposals = async (req, res) => {
   }
 };
 
+// Get single proposal by adCode
+const getProposalByAdCode = async (req, res) => {
+  const db = getDb();
+  try {
+    const { adCode } = req.params;
+
+    if (!adCode) {
+      return res.status(400).json({ error: 'Ad code is required' });
+    }
+
+    const proposal = await db.collection('marriage_proposals').findOne({
+      adCode: adCode.toUpperCase(),
+      approvalStatus: 'approved',
+      adStatus: 'active',
+    });
+
+    if (!proposal) {
+      return res.status(404).json({ error: 'Proposal not found' });
+    }
+
+    res.json({ success: true, proposal });
+  } catch (error) {
+    console.error('Error fetching proposal by adCode:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch proposal' });
+  }
+};
+
 // Update proposal
 const updateProposal = async (req, res) => {
   const db = getDb();
@@ -213,6 +254,27 @@ const updateProposal = async (req, res) => {
 
     if (!proposalId) {
       return res.status(400).json({ error: 'Proposal ID is required' });
+    }
+
+    const proposal = await db.collection('marriage_proposals').findOne({ _id: new ObjectId(proposalId) });
+    if (!proposal) {
+      return res.status(404).json({ error: 'Proposal not found' });
+    }
+
+    // Business rule: only one published ad can stay active per vendor.
+    if (adStatus === 'active' && proposal.vendorId) {
+      const existingPublishedCount = await db.collection('marriage_proposals').countDocuments({
+        vendorId: proposal.vendorId,
+        approvalStatus: 'approved',
+        adStatus: 'active',
+        _id: { $ne: proposal._id },
+      });
+
+      if (existingPublishedCount > 0) {
+        return res.status(409).json({
+          error: 'Only one ad can be published at a time. Pause the currently active ad first.',
+        });
+      }
     }
 
     const update = { $set: { updatedAt: new Date() } };
@@ -233,10 +295,6 @@ const updateProposal = async (req, res) => {
       update
     );
 
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ error: 'Proposal not found' });
-    }
-
     res.json({ success: true, message: 'Proposal updated successfully' });
   } catch (error) {
     console.error('Error updating proposal:', error);
@@ -254,21 +312,31 @@ const getVendorStats = async (req, res) => {
       return res.status(400).json({ error: 'Vendor ID is required' });
     }
 
+    const vendorMatches = [{ vendorId }];
+    if (ObjectId.isValid(vendorId)) {
+      vendorMatches.push({ vendorId: new ObjectId(vendorId) });
+    }
+
+    const requestVendorMatches = [{ vendorId }];
+    if (ObjectId.isValid(vendorId)) {
+      requestVendorMatches.push({ vendorId: new ObjectId(vendorId) });
+    }
+
     const [activeAds, pendingApprovals, totalViews, todayRequests] = await Promise.all([
       db.collection('marriage_proposals').countDocuments({
-        vendorId: new ObjectId(vendorId),
+        $or: vendorMatches,
         adStatus: 'active',
       }),
       db.collection('marriage_proposals').countDocuments({
-        vendorId: new ObjectId(vendorId),
+        $or: vendorMatches,
         approvalStatus: 'pending',
       }),
       db.collection('marriage_proposals').aggregate([
-        { $match: { vendorId: new ObjectId(vendorId) } },
+        { $match: { $or: vendorMatches } },
         { $group: { _id: null, total: { $sum: '$views' } } },
       ]).toArray(),
       db.collection('proposal_requests').countDocuments({
-        vendorId: new ObjectId(vendorId),
+        $or: requestVendorMatches,
         createdAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
       }),
     ]);
@@ -372,20 +440,59 @@ const getProposalRequests = async (req, res) => {
       return res.status(400).json({ error: 'Vendor ID is required' });
     }
 
-    const filter = { vendorId: new ObjectId(vendorId) };
+    const requestVendorIdMatches = [{ vendorId }];
+    const proposalVendorIdMatches = [{ 'proposal.vendorId': vendorId }];
 
-    if (adCode) filter.adCode = adCode;
-    if (status) filter.status = status;
-    if (dateFrom || dateTo) {
-      filter.createdAt = {};
-      if (dateFrom) filter.createdAt.$gte = new Date(dateFrom);
-      if (dateTo) filter.createdAt.$lte = new Date(dateTo);
+    if (ObjectId.isValid(vendorId)) {
+      const vendorObjectId = new ObjectId(vendorId);
+      requestVendorIdMatches.push({ vendorId: vendorObjectId });
+      proposalVendorIdMatches.push({ 'proposal.vendorId': vendorObjectId });
     }
 
-    const requests = await db.collection('proposal_requests')
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .toArray();
+    const matchStage = {
+      $and: [
+        {
+          $or: [
+            ...requestVendorIdMatches,
+            ...proposalVendorIdMatches,
+          ],
+        },
+      ],
+    };
+
+    if (adCode) {
+      matchStage.$and.push({ adCode });
+    }
+
+    if (status) {
+      matchStage.$and.push({ status });
+    }
+
+    if (dateFrom || dateTo) {
+      const createdAt = {};
+      if (dateFrom) createdAt.$gte = new Date(dateFrom);
+      if (dateTo) createdAt.$lte = new Date(dateTo);
+      matchStage.$and.push({ createdAt });
+    }
+
+    const requests = await db.collection('proposal_requests').aggregate([
+      {
+        $lookup: {
+          from: 'marriage_proposals',
+          localField: 'proposalId',
+          foreignField: '_id',
+          as: 'proposal',
+        },
+      },
+      { $unwind: { path: '$proposal', preserveNullAndEmptyArrays: true } },
+      { $match: matchStage },
+      {
+        $project: {
+          proposal: 0,
+        },
+      },
+      { $sort: { createdAt: -1 } },
+    ]).toArray();
 
     res.json({ success: true, requests });
   } catch (error) {
@@ -495,6 +602,7 @@ module.exports = {
   createProposal,
   getVendorProposals,
   getPublicProposals,
+  getProposalByAdCode,
   getAllProposalsAdmin,
   updateProposal,
   deleteProposal,

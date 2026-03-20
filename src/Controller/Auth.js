@@ -1,5 +1,6 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { ObjectId } = require('mongodb');
 const { getDb } = require('../db/mongo');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
@@ -273,9 +274,11 @@ const updateVendorProfile = async (req, res) => {
   try {
     const { vendorId, name, phone } = req.body;
     if (!vendorId) return res.status(400).json({ error: 'Vendor ID is required' });
+    if (!ObjectId.isValid(vendorId)) return res.status(400).json({ error: 'Invalid Vendor ID' });
 
     const updateData = { updatedAt: new Date() };
     if (name) updateData.username = name;
+    if (name) updateData.name = name;
     if (phone) updateData.phone = phone;
 
     const result = await db.collection('vendors').updateOne(
@@ -301,6 +304,9 @@ const changeVendorPassword = async (req, res) => {
     const { vendorId, currentPassword, newPassword } = req.body;
     if (!vendorId || !currentPassword || !newPassword) {
       return res.status(400).json({ error: 'All fields are required' });
+    }
+    if (!ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ error: 'Invalid Vendor ID' });
     }
 
     const vendor = await db.collection('vendors').findOne({ _id: new ObjectId(vendorId) });
