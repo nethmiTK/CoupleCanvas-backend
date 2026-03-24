@@ -63,4 +63,29 @@ router.patch('/', async (req, res) => {
   res.json({ message: 'Contact status updated successfully' });
 });
 
+// Delete contact message
+router.delete('/:id', async (req, res) => {
+  try {
+    const db = getDb();
+    const { id } = req.params;
+    
+    if (!id) {
+      return res.status(400).json({ error: 'Contact ID is required' });
+    }
+    
+    const result = await db.collection('contacts').deleteOne({
+      _id: new ObjectId(id)
+    });
+    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Contact message not found' });
+    }
+    
+    res.json({ message: 'Contact message deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting contact:', error);
+    res.status(500).json({ error: 'Failed to delete contact message' });
+  }
+});
+
 module.exports = router;

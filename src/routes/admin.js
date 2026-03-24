@@ -54,6 +54,21 @@ router.get('/vendor-detail/:id', async (req, res) => {
       if (profile.vendor_id) vIdMatches.push(new ObjectId(profile.vendor_id));
     }
 
+    // Enrich profile with vendor data if email/address is missing
+    if (profile && profile.vendor_id) {
+      const vendor = await db.collection('vendors').findOne(
+        { _id: new ObjectId(profile.vendor_id) }
+      );
+      if (vendor) {
+        // Merge vendor data with profile
+        profile.email = profile.email || vendor.email;
+        profile.city = profile.city || vendor.city;
+        profile.address = profile.address || vendor.address;
+        profile.phone = profile.phone || vendor.phone;
+        profile.businessName = profile.businessName || vendor.businessName;
+      }
+    }
+
     // Get latest subscription with plan details
     const subscription = await db.collection('vendor_subscriptions').aggregate([
       { $match: { vendorId: { $in: vIdMatches }, vendorType: type } },
