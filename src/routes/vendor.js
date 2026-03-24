@@ -251,35 +251,6 @@ router.put('/profile/:vendor_id', uploadProfileImage.single('profile_image'), as
   }
 });
 
-// Get vendor by ID
-router.get('/:id', async (req, res) => {
-  const db = getDb();
-  const { id } = req.params;
-
-  const vendor = await db.collection('vendor_profiles').aggregate([
-    { $match: { _id: new ObjectId(id) } },
-    {
-      $lookup: {
-        from: 'users',
-        localField: 'user_id',
-        foreignField: '_id',
-        as: 'user'
-      }
-    },
-    { $unwind: '$user' },
-    {
-      $lookup: {
-        from: 'vendor_services_albums',
-        localField: '_id',
-        foreignField: 'vendor_id',
-        as: 'services'
-      }
-    }
-  ]).toArray();
-
-  res.json({ vendor: vendor[0] || null });
-});
-
 // Get vendor status
 router.get('/status', async (req, res) => {
   const db = getDb();
@@ -506,18 +477,26 @@ router.delete('/template', async (req, res) => {
 
 // Videos CRUD
 router.get('/video', async (req, res) => {
-  const db = getDb();
-  const { vendor_id } = req.query;
-
-  console.log(`📡 GET /vendor/video - vendor_id: ${vendor_id}`);
-
-  if (!vendor_id) {
-    const errorResponse = { error: 'vendor_id is required', videos: [] };
-    console.warn('⚠️ vendor_id missing:', errorResponse);
-    return res.status(400).json(errorResponse);
-  }
-
   try {
+    const db = getDb();
+    const { vendor_id } = req.query;
+
+    console.log(`📡 GET /vendor/video - vendor_id: ${vendor_id}`);
+
+    if (!db) {
+      console.error('❌ Database connection not available');
+      return res.status(503).json({ 
+        error: 'Database connection unavailable', 
+        videos: [] 
+      });
+    }
+
+    if (!vendor_id) {
+      const errorResponse = { error: 'vendor_id is required', videos: [] };
+      console.warn('⚠️ vendor_id missing:', errorResponse);
+      return res.status(400).json(errorResponse);
+    }
+
     // Validate vendor_id format
     let query = {};
     if (ObjectId.isValid(vendor_id)) {
@@ -533,15 +512,16 @@ router.get('/video', async (req, res) => {
     const videos = await db.collection('vendor_video').find(query).sort({ created_at: -1 }).toArray();
     
     console.log(`✅ Found ${videos.length} videos`);
-    res.json({ videos });
+    return res.status(200).json({ videos });
   } catch (err) {
-    console.error('❌ Error fetching videos:', err.message);
+    console.error('❌ Error fetching videos:', err);
+    console.error('   Stack:', err.stack);
     const errorResponse = { 
-      error: `Failed to fetch videos: ${err.message}`, 
-      details: err.toString(),
+      error: err.message || 'Failed to fetch videos',
+      cause: err.name,
       videos: [] 
     };
-    res.status(500).json(errorResponse);
+    return res.status(500).json(errorResponse);
   }
 });
 
@@ -896,6 +876,40 @@ router.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
   });
+});
+
+// Get vendor by ID (MUST be last to avoid catching specific routes like /video, /status, etc.)
+router.get('/:id', async (req, res) => {
+  const db = getDb();
+  const { id } = req.params;
+
+  // Validate ObjectId format
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: 'Invalid vendor ID format' });
+  }
+
+  const vendor = await db.collection('vendor_profiles').aggregate([
+    { $match: { _id: new ObjectId(id) } },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'user_id',
+        foreignField: '_id',
+        as: 'user'
+      }
+    },
+    { $unwind: '$user' },
+    {
+      $lookup: {
+        from: 'vendor_services_albums',
+        localField: '_id',
+        foreignField: 'vendor_id',
+        as: 'services'
+      }
+    }
+  ]).toArray();
+
+  res.json({ vendor: vendor[0] || null });
 });
 
 module.exports = router;
