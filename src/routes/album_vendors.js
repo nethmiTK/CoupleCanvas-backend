@@ -148,68 +148,19 @@ router.delete('/:id', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid vendor ID' });
     }
 
-    // Find the vendor doc first
-    const vendor = await db.collection('album_vendors').findOne({ _id: new ObjectId(id) });
-    if (!vendor) {
+    // Check if the album vendor exists
+    const albumVendor = await db.collection('album_vendors').findOne({ _id: new ObjectId(id) });
+    if (!albumVendor) {
       return res.status(404).json({ success: false, error: 'Album vendor not found' });
     }
 
-    const relatedVendorIds = [new ObjectId(id)];
-    if (vendor.vendor_id && ObjectId.isValid(String(vendor.vendor_id))) {
-      const linkedId = new ObjectId(String(vendor.vendor_id));
-      if (!relatedVendorIds.some((v) => v.equals(linkedId))) {
-        relatedVendorIds.push(linkedId);
-      }
-    }
-    const relatedVendorIdStrings = relatedVendorIds.map((v) => v.toString());
+    // Delete the album vendor
+    await db.collection('album_vendors').deleteOne({ _id: new ObjectId(id) });
 
-    // Remove vendor records from both registries if linked by _id or vendor_id.
-    await db.collection('album_vendors').deleteMany({
-      $or: [
-        { _id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIdStrings } }
-      ]
+    res.json({
+      success: true,
+      message: 'Album vendor deleted successfully',
     });
-
-    await db.collection('proposal_vendors').deleteMany({
-      $or: [
-        { _id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIdStrings } }
-      ]
-    });
-
-    // Remove shared vendor account + subscriptions.
-    await db.collection('vendors').deleteMany({ _id: { $in: relatedVendorIds } });
-    await db.collection('vendor_subscriptions').deleteMany({
-      vendorId: { $in: relatedVendorIds }
-    });
-
-    // Cascade delete album + proposal data for this vendor identity.
-    await db.collection('albums').deleteMany({
-      $or: [
-        { vendor_id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIdStrings } }
-      ]
-    });
-
-    await db.collection('marriage_proposals').deleteMany({
-      $or: [
-        { vendorId: { $in: relatedVendorIds } },
-        { vendorId: { $in: relatedVendorIdStrings } }
-      ]
-    });
-
-    // Legacy collection cleanup (if used).
-    await db.collection('vendor_proposal').deleteMany({
-      $or: [
-        { vendor_id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIdStrings } }
-      ]
-    });
-
-    res.json({ success: true, message: 'Vendor, albums, and proposals deleted successfully' });
   } catch (error) {
     console.error('Error deleting album vendor:', error);
     res.status(500).json({ success: false, error: 'Failed to delete album vendor' });

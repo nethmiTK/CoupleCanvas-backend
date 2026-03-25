@@ -392,7 +392,8 @@ router.delete('/proposal-vendors/:id', async (req, res) => {
     }
     const relatedVendorIdStrings = relatedVendorIds.map((v) => v.toString());
 
-    // Remove vendor records from both registries if linked by _id or vendor_id.
+    // Remove only the proposal vendor record.
+    // NOTE: We do NOT delete from 'album_vendors', 'vendors', or 'albums' to prevent data loss.
     await db.collection('proposal_vendors').deleteMany({
       $or: [
         { _id: { $in: relatedVendorIds } },
@@ -401,32 +402,12 @@ router.delete('/proposal-vendors/:id', async (req, res) => {
       ]
     });
 
-    await db.collection('album_vendors').deleteMany({
-      $or: [
-        { _id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIdStrings } }
-      ]
-    });
-
-    // Remove shared vendor account + subscriptions.
-    await db.collection('vendors').deleteMany({ _id: { $in: relatedVendorIds } });
-    await db.collection('vendor_subscriptions').deleteMany({
-      vendorId: { $in: relatedVendorIds }
-    });
-
-    // Cascade delete proposal + album data for this vendor identity.
+    // Cascade delete ONLY proposal data for this vendor identity.
+    // We leave 'albums' and shared 'vendors' accounts intact.
     await db.collection('marriage_proposals').deleteMany({
       $or: [
         { vendorId: { $in: relatedVendorIds } },
         { vendorId: { $in: relatedVendorIdStrings } }
-      ]
-    });
-
-    await db.collection('albums').deleteMany({
-      $or: [
-        { vendor_id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIdStrings } }
       ]
     });
 
@@ -438,7 +419,7 @@ router.delete('/proposal-vendors/:id', async (req, res) => {
       ]
     });
 
-    res.json({ success: true, message: 'Vendor, proposals, and albums deleted successfully' });
+    res.json({ success: true, message: 'Proposal vendor and proposals deleted successfully (Album vendor data preserved)' });
   } catch (err) {
     console.error('Error deleting proposal vendor:', err);
     res.status(500).json({ error: 'Failed to delete proposal vendor' });

@@ -415,11 +415,16 @@ router.delete('/proposal', async (req, res) => {
   const db = getDb();
   const { proposal_id } = req.query;
 
-  await db.collection('vendor_proposal').deleteOne({
-    _id: new ObjectId(proposal_id)
+  // Delete only the proposal vendor
+  const result = await db.collection('vendor_proposal').deleteOne({
+    _id: new ObjectId(proposal_id),
   });
 
-  res.json({ message: 'Proposal deleted successfully' });
+  if (result.deletedCount === 0) {
+    return res.status(404).json({ message: 'Proposal vendor not found' });
+  }
+
+  res.json({ message: 'Proposal vendor deleted successfully' });
 });
 
 // Album templates CRUD
