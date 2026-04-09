@@ -1,48 +1,50 @@
-const express = require('express');
-const { getDb } = require('../db/mongo');
-const { ObjectId } = require('mongodb');
+const express = require("express");
+const { getDb } = require("../db/mongo");
+const { ObjectId } = require("mongodb");
 const router = express.Router();
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-this';
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-this";
 
 // Get all admins
-router.get('/all', async (req, res) => {
+router.get("/all", async (req, res) => {
   const db = getDb();
-  const admins = await db.collection('admin').find().toArray();
+  const admins = await db.collection("admin").find().toArray();
   res.json({ admins });
 });
 
 // Admin: Get specific vendor details (Subscription, Profile, Stats)
-router.get('/vendor-detail/:id', async (req, res) => {
+router.get("/vendor-detail/:id", async (req, res) => {
   const db = getDb();
   try {
     const { id } = req.params;
     const { type } = req.query; // 'album' or 'proposal'
 
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ error: 'Invalid ID' });
+      return res.status(400).json({ error: "Invalid ID" });
     }
 
     let profile = null;
     let counts = { albums: 0, ads: 0 };
     let actualVendorId = id;
 
-    if (type === 'album') {
-      profile = await db.collection('album_vendors').findOne({
-        $or: [{ _id: new ObjectId(id) }, { vendor_id: new ObjectId(id) }]
+    if (type === "album") {
+      profile = await db.collection("album_vendors").findOne({
+        $or: [{ _id: new ObjectId(id) }, { vendor_id: new ObjectId(id) }],
       });
       if (profile) actualVendorId = profile.vendor_id || profile._id;
-      counts.albums = await db.collection('albums').countDocuments({ vendor_id: new ObjectId(actualVendorId) });
+      counts.albums = await db
+        .collection("albums")
+        .countDocuments({ vendor_id: new ObjectId(actualVendorId) });
     } else {
       // Fetch from proposal_vendors (the admin-managed vendor registry)
-      profile = await db.collection('proposal_vendors').findOne({
-        $or: [{ _id: new ObjectId(id) }, { vendor_id: new ObjectId(id) }]
+      profile = await db.collection("proposal_vendors").findOne({
+        $or: [{ _id: new ObjectId(id) }, { vendor_id: new ObjectId(id) }],
       });
       if (profile) {
         actualVendorId = profile._id;
-        counts.ads = await db.collection('marriage_proposals').countDocuments({
-          vendorId: profile._id
+        counts.ads = await db.collection("marriage_proposals").countDocuments({
+          vendorId: profile._id,
         });
         if (counts.ads === 0) counts.ads = 0;
       }
@@ -56,9 +58,9 @@ router.get('/vendor-detail/:id', async (req, res) => {
 
     // Enrich profile with vendor data if email/address is missing
     if (profile && profile.vendor_id) {
-      const vendor = await db.collection('vendors').findOne(
-        { _id: new ObjectId(profile.vendor_id) }
-      );
+      const vendor = await db
+        .collection("vendors")
+        .findOne({ _id: new ObjectId(profile.vendor_id) });
       if (vendor) {
         // Merge vendor data with profile
         profile.email = profile.email || vendor.email;
@@ -70,39 +72,46 @@ router.get('/vendor-detail/:id', async (req, res) => {
     }
 
     // Get latest subscription with plan details
-    const subscription = await db.collection('vendor_subscriptions').aggregate([
-      { $match: { vendorId: { $in: vIdMatches }, vendorType: type } },
-      { $sort: { createdAt: -1 } },
-      { $limit: 1 },
-      {
-        $addFields: {
-          planObjectId: {
-            $cond: {
-              if: { $and: [{ $ne: ["$planId", null] }, { $ne: ["$planId", ""] }] },
-              then: { $toObjectId: "$planId" },
-              else: null
-            }
-          }
-        }
-      },
-      {
-        $lookup: {
-          from: 'sub_plan',
-          localField: 'planObjectId',
-          foreignField: '_id',
-          as: 'planDetails'
-        }
-      },
-      { $unwind: { path: '$planDetails', preserveNullAndEmptyArrays: true } }
-    ]).toArray();
+    const subscription = await db
+      .collection("vendor_subscriptions")
+      .aggregate([
+        { $match: { vendorId: { $in: vIdMatches }, vendorType: type } },
+        { $sort: { createdAt: -1 } },
+        { $limit: 1 },
+        {
+          $addFields: {
+            planObjectId: {
+              $cond: {
+                if: {
+                  $and: [{ $ne: ["$planId", null] }, { $ne: ["$planId", ""] }],
+                },
+                then: { $toObjectId: "$planId" },
+                else: null,
+              },
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: "sub_plan",
+            localField: "planObjectId",
+            foreignField: "_id",
+            as: "planDetails",
+          },
+        },
+        { $unwind: { path: "$planDetails", preserveNullAndEmptyArrays: true } },
+      ])
+      .toArray();
 
     // Fetch vendor login credentials from vendors collection
     let vendorCredentials = null;
     if (profile && profile.vendor_id) {
-      const vendor = await db.collection('vendors').findOne(
-        { _id: new ObjectId(profile.vendor_id) },
-        { projection: { email: 1, username: 1, plainPassword: 1 } }
-      );
+      const vendor = await db
+        .collection("vendors")
+        .findOne(
+          { _id: new ObjectId(profile.vendor_id) },
+          { projection: { email: 1, username: 1, plainPassword: 1 } },
+        );
       if (vendor) {
         vendorCredentials = {
           email: vendor.email,
@@ -113,9 +122,14 @@ router.get('/vendor-detail/:id', async (req, res) => {
     }
 
     // Fetch vendor contact messages
-    const messages = await db.collection('contacts').find({
-      vendor_id: { $in: vIdMatches }
-    }).sort({ created_at: -1 }).limit(10).toArray();
+    const messages = await db
+      .collection("contacts")
+      .find({
+        vendor_id: { $in: vIdMatches },
+      })
+      .sort({ created_at: -1 })
+      .limit(10)
+      .toArray();
 
     res.json({
       success: true,
@@ -123,10 +137,10 @@ router.get('/vendor-detail/:id', async (req, res) => {
       counts,
       subscription: subscription.length > 0 ? subscription[0] : null,
       vendorCredentials,
-      messages
+      messages,
     });
   } catch (err) {
-    console.error('Vendor detail error:', err);
+    console.error("Vendor detail error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -138,7 +152,7 @@ router.get('/vendor-detail/:id', async (req, res) => {
 // ...existing code...
 
 // Update admin
-router.put('/:id', async (req, res) => {
+router.put("/:id", async (req, res) => {
   const db = getDb();
   const { name, email, status, role } = req.body;
   const update = {};
@@ -146,113 +160,131 @@ router.put('/:id', async (req, res) => {
   if (email) update.email = email;
   if (status) update.status = status;
   if (role) update.role = role;
-  const result = await db.collection('admin').updateOne({ _id: new ObjectId(req.params.id) }, { $set: update });
-  if (result.matchedCount === 0) return res.status(404).json({ error: 'Admin not found' });
-  res.json({ message: 'Admin updated' });
+  const result = await db
+    .collection("admin")
+    .updateOne({ _id: new ObjectId(req.params.id) }, { $set: update });
+  if (result.matchedCount === 0)
+    return res.status(404).json({ error: "Admin not found" });
+  res.json({ message: "Admin updated" });
 });
 
 // Delete admin
-router.delete('/:id', async (req, res) => {
+router.delete("/:id", async (req, res) => {
   const db = getDb();
-  const result = await db.collection('admin').deleteOne({ _id: new ObjectId(req.params.id) });
-  if (result.deletedCount === 0) return res.status(404).json({ error: 'Admin not found' });
-  res.json({ message: 'Admin deleted' });
+  const result = await db
+    .collection("admin")
+    .deleteOne({ _id: new ObjectId(req.params.id) });
+  if (result.deletedCount === 0)
+    return res.status(404).json({ error: "Admin not found" });
+  res.json({ message: "Admin deleted" });
 });
 
 // Admin signup
-router.post('/signup', async (req, res) => {
+router.post("/signup", async (req, res) => {
   const db = getDb();
   const { name, email, password } = req.body;
   if (!name || !email || !password) {
-    return res.status(400).json({ error: 'Name, email, and password are required' });
+    return res
+      .status(400)
+      .json({ error: "Name, email, and password are required" });
   }
-  const existing = await db.collection('admin').findOne({ email });
+  const existing = await db.collection("admin").findOne({ email });
   if (existing) {
-    return res.status(400).json({ error: 'Admin already exists' });
+    return res.status(400).json({ error: "Admin already exists" });
   }
   const hashedPassword = await bcrypt.hash(password, 10);
   // Generate id (use email or random)
-  const id = 'admin_' + Math.random().toString(36).substring(2, 10);
-  const result = await db.collection('admin').insertOne({
+  const id = "admin_" + Math.random().toString(36).substring(2, 10);
+  const result = await db.collection("admin").insertOne({
     id,
     name,
     email,
     password: hashedPassword,
     createdDate: new Date(),
-    lastLogin: null
+    lastLogin: null,
   });
-  res.status(201).json({ message: 'Admin registered successfully', adminId: result.insertedId });
+  res
+    .status(201)
+    .json({
+      message: "Admin registered successfully",
+      adminId: result.insertedId,
+    });
 });
 
 // Get pending vendors for approval
-router.get('/approve', async (req, res) => {
+router.get("/approve", async (req, res) => {
   const db = getDb();
 
-  const vendors = await db.collection('vendor_profiles').aggregate([
-    { $match: { approval_status: 'pending' } },
-    {
-      $lookup: {
-        from: 'vendor_types',
-        localField: 'vendor_type_id',
-        foreignField: '_id',
-        as: 'vendor_type'
-      }
-    },
-    {
-      $lookup: {
-        from: 'users',
-        localField: 'user_id',
-        foreignField: '_id',
-        as: 'user'
-      }
-    },
-    { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
-    { $sort: { created_at: 1 } }
-  ]).toArray();
+  const vendors = await db
+    .collection("vendor_profiles")
+    .aggregate([
+      { $match: { approval_status: "pending" } },
+      {
+        $lookup: {
+          from: "vendor_types",
+          localField: "vendor_type_id",
+          foreignField: "_id",
+          as: "vendor_type",
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "user_id",
+          foreignField: "_id",
+          as: "user",
+        },
+      },
+      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+      { $sort: { created_at: 1 } },
+    ])
+    .toArray();
 
   res.json({ vendors });
 });
 
 // Approve or reject vendor
-router.post('/approve', async (req, res) => {
+router.post("/approve", async (req, res) => {
   const db = getDb();
   const { vendor_id, status, admin_remarks, admin_id } = req.body;
 
   if (!vendor_id || !status) {
-    return res.status(400).json({ error: 'vendor_id and status are required' });
+    return res.status(400).json({ error: "vendor_id and status are required" });
   }
 
-  if (!['approved', 'rejected'].includes(status)) {
-    return res.status(400).json({ error: 'status must be approved or rejected' });
+  if (!["approved", "rejected"].includes(status)) {
+    return res
+      .status(400)
+      .json({ error: "status must be approved or rejected" });
   }
 
   // Update vendor profile
-  await db.collection('vendor_profiles').updateOne(
+  await db.collection("vendor_profiles").updateOne(
     { _id: new ObjectId(vendor_id) },
     {
       $set: {
         approval_status: status,
-        admin_remarks: admin_remarks || '',
-        approved_at: status === 'approved' ? new Date() : null,
-        updated_at: new Date()
-      }
-    }
+        admin_remarks: admin_remarks || "",
+        approved_at: status === "approved" ? new Date() : null,
+        updated_at: new Date(),
+      },
+    },
   );
 
   // Log the approval action
-  await db.collection('admin_approval_log').insertOne({
+  await db.collection("admin_approval_log").insertOne({
     vendor_id: new ObjectId(vendor_id),
     admin_id: admin_id ? new ObjectId(admin_id) : null,
     action: status,
-    remarks: admin_remarks || '',
-    created_at: new Date()
+    remarks: admin_remarks || "",
+    created_at: new Date(),
   });
 
   res.json({ message: `Vendor ${status} successfully` });
 });
 
 // Get proposal vendors
-router.get('/proposal-vendors', async (req, res) => {
+router.get("/proposal-vendors", async (req, res) => {
   const db = getDb();
   try {
     const { status, search } = req.query;
@@ -261,64 +293,81 @@ router.get('/proposal-vendors', async (req, res) => {
     const skip = (page - 1) * limit;
 
     const matchFilter = {};
-    if (status && status !== 'all') {
+    if (status && status !== "all") {
       matchFilter.status = status;
     }
 
     if (search) {
       matchFilter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { whatsappNo: { $regex: search, $options: 'i' } }
+        { name: { $regex: search, $options: "i" } },
+        { whatsappNo: { $regex: search, $options: "i" } },
       ];
     }
 
-    const totalVendors = await db.collection('proposal_vendors').countDocuments(matchFilter);
+    const totalVendors = await db
+      .collection("proposal_vendors")
+      .countDocuments(matchFilter);
 
-    const vendors = await db.collection('proposal_vendors').aggregate([
-      { $match: matchFilter },
-      { $sort: { createdAt: -1 } },
-      { $skip: skip },
-      { $limit: limit },
-      {
-        $lookup: {
-          from: 'vendor_subscriptions',
-          let: { vId: '$_id', vIdField: '$vendor_id' },
-          pipeline: [
-            {
-              $match: {
-                $and: [
-                  {
-                    $or: [
-                      { $expr: { $eq: ['$vendorId', '$$vId'] } },
-                      { $expr: { $and: [{ $ne: ['$$vIdField', null] }, { $eq: ['$vendorId', '$$vIdField'] }] } }
-                    ]
-                  },
-                  { vendorType: 'proposal' }
-                ]
-              }
-            },
-            { $sort: { createdAt: -1 } },
-            { $limit: 1 },
-            { $project: { paymentSlip: 1, planName: 1, amount: 1 } }
-          ],
-          as: 'latestSubscription'
-        }
-      },
-      {
-        $addFields: {
-          slipPhoto: {
-            $cond: {
-              if: { $and: [{ $gt: [{ $size: '$latestSubscription' }, 0] }, { $arrayElemAt: ['$latestSubscription.paymentSlip', 0] }] },
-              then: { $arrayElemAt: ['$latestSubscription.paymentSlip', 0] },
-              else: '$slipPhoto' // Fallback to profile slipPhoto if sub has none
-            }
+    const vendors = await db
+      .collection("proposal_vendors")
+      .aggregate([
+        { $match: matchFilter },
+        { $sort: { createdAt: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: "vendor_subscriptions",
+            let: { vId: "$_id", vIdField: "$vendor_id" },
+            pipeline: [
+              {
+                $match: {
+                  $and: [
+                    {
+                      $or: [
+                        { $expr: { $eq: ["$vendorId", "$$vId"] } },
+                        {
+                          $expr: {
+                            $and: [
+                              { $ne: ["$$vIdField", null] },
+                              { $eq: ["$vendorId", "$$vIdField"] },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                    { vendorType: "proposal" },
+                  ],
+                },
+              },
+              { $sort: { createdAt: -1 } },
+              { $limit: 1 },
+              { $project: { paymentSlip: 1, planName: 1, amount: 1 } },
+            ],
+            as: "latestSubscription",
           },
-          planName: { $arrayElemAt: ['$latestSubscription.planName', 0] },
-          planAmount: { $arrayElemAt: ['$latestSubscription.amount', 0] }
-        }
-      },
-      { $project: { latestSubscription: 0 } }
-    ]).toArray();
+        },
+        {
+          $addFields: {
+            slipPhoto: {
+              $cond: {
+                if: {
+                  $and: [
+                    { $gt: [{ $size: "$latestSubscription" }, 0] },
+                    { $arrayElemAt: ["$latestSubscription.paymentSlip", 0] },
+                  ],
+                },
+                then: { $arrayElemAt: ["$latestSubscription.paymentSlip", 0] },
+                else: "$slipPhoto", // Fallback to profile slipPhoto if sub has none
+              },
+            },
+            planName: { $arrayElemAt: ["$latestSubscription.planName", 0] },
+            planAmount: { $arrayElemAt: ["$latestSubscription.amount", 0] },
+          },
+        },
+        { $project: { latestSubscription: 0 } },
+      ])
+      .toArray();
 
     res.json({
       success: true,
@@ -327,61 +376,69 @@ router.get('/proposal-vendors', async (req, res) => {
         total: totalVendors,
         page,
         limit,
-        pages: Math.ceil(totalVendors / limit)
-      }
+        pages: Math.ceil(totalVendors / limit),
+      },
     });
   } catch (err) {
-    console.error('Error fetching proposal vendors:', err);
-    res.status(500).json({ error: 'Failed to fetch proposal vendors' });
+    console.error("Error fetching proposal vendors:", err);
+    res.status(500).json({ error: "Failed to fetch proposal vendors" });
   }
 });
 
 // Update proposal vendor status
-router.patch('/proposal-vendors/:id/status', async (req, res) => {
+router.patch("/proposal-vendors/:id/status", async (req, res) => {
   const db = getDb();
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    await db.collection('proposal_vendors').updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status, updatedAt: new Date() } }
-    );
+    await db
+      .collection("proposal_vendors")
+      .updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status, updatedAt: new Date() } },
+      );
 
     // If active, also update the latest pending subscription to active
-    if (status === 'active') {
-      const vendor = await db.collection('proposal_vendors').findOne({ _id: new ObjectId(id) });
+    if (status === "active") {
+      const vendor = await db
+        .collection("proposal_vendors")
+        .findOne({ _id: new ObjectId(id) });
       const vIdMatches = [new ObjectId(id)];
       if (vendor?.vendor_id) vIdMatches.push(new ObjectId(vendor.vendor_id));
 
-      await db.collection('vendor_subscriptions').updateOne(
+      await db.collection("vendor_subscriptions").updateOne(
         {
           vendorId: { $in: vIdMatches },
-          vendorType: 'proposal',
-          status: 'pending'
+          vendorType: "proposal",
+          status: "pending",
         },
-        { $set: { status: 'active', updatedAt: new Date() } },
-        { sort: { createdAt: -1 } }
+        { $set: { status: "active", updatedAt: new Date() } },
+        { sort: { createdAt: -1 } },
       );
     }
 
     res.json({ success: true, message: `Vendor ${status}` });
   } catch (err) {
-    console.error('Error updating proposal vendor:', err);
-    res.status(500).json({ error: 'Failed to update vendor status' });
+    console.error("Error updating proposal vendor:", err);
+    res.status(500).json({ error: "Failed to update vendor status" });
   }
 });
 
 // Delete proposal vendor
-router.delete('/proposal-vendors/:id', async (req, res) => {
+router.delete("/proposal-vendors/:id", async (req, res) => {
   const db = getDb();
   try {
     const { id } = req.params;
-    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid vendor id' });
+    if (!ObjectId.isValid(id))
+      return res.status(400).json({ error: "Invalid vendor id" });
 
     // Find the vendor first to get the vendor_id (link to vendors table)
-    const vendor = await db.collection('proposal_vendors').findOne({ _id: new ObjectId(id) });
-    if (!vendor) return res.status(404).json({ error: 'Proposal vendor not found' });
+    const vendor = await db
+      .collection("proposal_vendors")
+      .findOne({ _id: new ObjectId(id) });
+    if (!vendor)
+      return res.status(404).json({ error: "Proposal vendor not found" });
 
     const relatedVendorIds = [new ObjectId(id)];
     if (vendor.vendor_id && ObjectId.isValid(String(vendor.vendor_id))) {
@@ -394,40 +451,44 @@ router.delete('/proposal-vendors/:id', async (req, res) => {
 
     // Remove only the proposal vendor record.
     // NOTE: We do NOT delete from 'album_vendors', 'vendors', or 'albums' to prevent data loss.
-    await db.collection('proposal_vendors').deleteMany({
+    await db.collection("proposal_vendors").deleteMany({
       $or: [
         { _id: { $in: relatedVendorIds } },
         { vendor_id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIdStrings } }
-      ]
+        { vendor_id: { $in: relatedVendorIdStrings } },
+      ],
     });
 
     // Cascade delete ONLY proposal data for this vendor identity.
     // We leave 'albums' and shared 'vendors' accounts intact.
-    await db.collection('marriage_proposals').deleteMany({
+    await db.collection("marriage_proposals").deleteMany({
       $or: [
         { vendorId: { $in: relatedVendorIds } },
-        { vendorId: { $in: relatedVendorIdStrings } }
-      ]
+        { vendorId: { $in: relatedVendorIdStrings } },
+      ],
     });
 
     // Legacy collection cleanup (if used).
-    await db.collection('vendor_proposal').deleteMany({
+    await db.collection("vendor_proposal").deleteMany({
       $or: [
         { vendor_id: { $in: relatedVendorIds } },
-        { vendor_id: { $in: relatedVendorIdStrings } }
-      ]
+        { vendor_id: { $in: relatedVendorIdStrings } },
+      ],
     });
 
-    res.json({ success: true, message: 'Proposal vendor and proposals deleted successfully (Album vendor data preserved)' });
+    res.json({
+      success: true,
+      message:
+        "Proposal vendor and proposals deleted successfully (Album vendor data preserved)",
+    });
   } catch (err) {
-    console.error('Error deleting proposal vendor:', err);
-    res.status(500).json({ error: 'Failed to delete proposal vendor' });
+    console.error("Error deleting proposal vendor:", err);
+    res.status(500).json({ error: "Failed to delete proposal vendor" });
   }
 });
 
 // Get statistics
-router.get('/stats', async (req, res) => {
+router.get("/stats", async (req, res) => {
   try {
     const db = getDb();
 
@@ -439,16 +500,18 @@ router.get('/stats', async (req, res) => {
       usersCount,
       vendorsCount,
       customersCount,
-      pendingVendorsCount
+      pendingVendorsCount,
     ] = await Promise.all([
-      db.collection('albums').countDocuments(),
-      db.collection('services').countDocuments(),
-      db.collection('vendor_products').countDocuments(),
-      db.collection('vendor_proposal').countDocuments(),
-      db.collection('users').countDocuments(),
-      db.collection('vendor_profiles').countDocuments(),
-      db.collection('customers').countDocuments(),
-      db.collection('vendor_profiles').countDocuments({ approval_status: 'pending' })
+      db.collection("albums").countDocuments(),
+      db.collection("services").countDocuments(),
+      db.collection("vendor_products").countDocuments(),
+      db.collection("vendor_proposal").countDocuments(),
+      db.collection("users").countDocuments(),
+      db.collection("vendor_profiles").countDocuments(),
+      db.collection("customers").countDocuments(),
+      db
+        .collection("vendor_profiles")
+        .countDocuments({ approval_status: "pending" }),
     ]);
 
     res.json({
@@ -460,115 +523,108 @@ router.get('/stats', async (req, res) => {
         users: usersCount,
         vendors: vendorsCount,
         customers: customersCount,
-        pendingVendors: pendingVendorsCount
-      }
+        pendingVendors: pendingVendorsCount,
+      },
     });
   } catch (err) {
-    console.error('Error fetching admin stats:', err);
-    res.status(500).json({ error: 'Failed to fetch admin stats', details: err.message });
+    console.error("Error fetching admin stats:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch admin stats", details: err.message });
   }
 });
 
 // Cleanup expired profiles
-router.get('/cleanup/expired-profiles', async (req, res) => {
+router.get("/cleanup/expired-profiles", async (req, res) => {
   const db = getDb();
 
-  const result = await db.collection('vendor_profiles').deleteMany({
-    expire_date: { $lt: new Date() }
+  const result = await db.collection("vendor_profiles").deleteMany({
+    expire_date: { $lt: new Date() },
   });
 
   res.json({
-    message: 'Expired profiles cleaned up',
-    deletedCount: result.deletedCount
+    message: "Expired profiles cleaned up",
+    deletedCount: result.deletedCount,
   });
 });
 
 // Admin login
-router.post('/login', async (req, res) => {
-  const db = getDb();
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
-  }
-  const admin = await db.collection('admin').findOne({ email });
-  if (!admin) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-  const valid = await bcrypt.compare(password, admin.password);
-  if (!valid) {
-    return res.status(401).json({ error: 'Invalid credentials' });
-  }
-  // Update lastLogin
-  await db.collection('admin').updateOne({ _id: admin._id }, { $set: { lastLogin: new Date() } });
-  const token = jwt.sign({ adminId: admin._id, email: admin.email, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
-  res.json({
-    message: 'Login successful',
-    token,
-    admin: {
-      id: admin.id,
-      name: admin.name,
-      email: admin.email
-    }
-  });
-});
-
 
 // ===== SERVICE CATEGORIES ROUTES =====
 
 // Create service category
-router.post('/service-categories', async (req, res) => {
+router.post("/service-categories", async (req, res) => {
   try {
     const db = getDb();
     const { name, description, imageUrl, status } = req.body;
     if (!name || !description) {
-      return res.status(400).json({ error: 'name and description are required' });
+      return res
+        .status(400)
+        .json({ error: "name and description are required" });
     }
     const category = {
       name,
       description,
-      imageUrl: imageUrl || '',
-      status: status || 'active',
-      createdAt: new Date()
+      imageUrl: imageUrl || "",
+      status: status || "active",
+      createdAt: new Date(),
     };
-    const result = await db.collection('service_categories').insertOne(category);
+    const result = await db
+      .collection("service_categories")
+      .insertOne(category);
     res.status(201).json({
-      message: 'Service category created successfully',
-      category: { ...category, _id: result.insertedId }
+      message: "Service category created successfully",
+      category: { ...category, _id: result.insertedId },
     });
   } catch (err) {
-    console.error('Error creating service category:', err);
-    res.status(500).json({ error: 'Failed to create service category', details: err.message });
+    console.error("Error creating service category:", err);
+    res
+      .status(500)
+      .json({
+        error: "Failed to create service category",
+        details: err.message,
+      });
   }
 });
 
 // Get all service categories
-router.get('/service-categories', async (req, res) => {
+router.get("/service-categories", async (req, res) => {
   try {
     const db = getDb();
-    const categories = await db.collection('service_categories').find().toArray();
+    const categories = await db
+      .collection("service_categories")
+      .find()
+      .toArray();
     res.json({ categories });
   } catch (err) {
-    console.error('Error fetching service categories:', err);
-    res.status(500).json({ error: 'Failed to fetch service categories', details: err.message });
+    console.error("Error fetching service categories:", err);
+    res
+      .status(500)
+      .json({
+        error: "Failed to fetch service categories",
+        details: err.message,
+      });
   }
 });
 
 // Get single service category by ID
-router.get('/service-categories/:id', async (req, res) => {
+router.get("/service-categories/:id", async (req, res) => {
   const db = getDb();
   try {
-    const category = await db.collection('service_categories').findOne({ _id: new ObjectId(req.params.id) });
+    const category = await db
+      .collection("service_categories")
+      .findOne({ _id: new ObjectId(req.params.id) });
     if (!category) {
-      return res.status(404).json({ error: 'Service category not found' });
+      return res.status(404).json({ error: "Service category not found" });
     }
     res.json(category);
   } catch (err) {
-    res.status(400).json({ error: 'Invalid ID format' });
+    res.status(400).json({ error: "Invalid ID format" });
   }
 });
 
 // Update service category
-router.put('/service-categories/:id', async (req, res) => {
+router.put("/service-categories/:id", async (req, res) => {
   const db = getDb();
   const { name, description, imageUrl, status } = req.body;
   try {
@@ -578,88 +634,162 @@ router.put('/service-categories/:id', async (req, res) => {
     if (imageUrl !== undefined) updateData.imageUrl = imageUrl;
     if (status) updateData.status = status;
     updateData.updatedAt = new Date();
-    const result = await db.collection('service_categories').updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $set: updateData }
-    );
+    const result = await db
+      .collection("service_categories")
+      .updateOne({ _id: new ObjectId(req.params.id) }, { $set: updateData });
     if (result.matchedCount === 0) {
-      return res.status(404).json({ error: 'Service category not found' });
+      return res.status(404).json({ error: "Service category not found" });
     }
-    res.json({ message: 'Service category updated successfully', modifiedCount: result.modifiedCount });
+    res.json({
+      message: "Service category updated successfully",
+      modifiedCount: result.modifiedCount,
+    });
   } catch (err) {
-    res.status(400).json({ error: 'Invalid ID format' });
+    res.status(400).json({ error: "Invalid ID format" });
   }
 });
 
 // Delete service category
-router.delete('/service-categories/:id', async (req, res) => {
+router.delete("/service-categories/:id", async (req, res) => {
   const db = getDb();
   try {
-    const result = await db.collection('service_categories').deleteOne({ _id: new ObjectId(req.params.id) });
+    const result = await db
+      .collection("service_categories")
+      .deleteOne({ _id: new ObjectId(req.params.id) });
     if (result.deletedCount === 0) {
-      return res.status(404).json({ error: 'Service category not found' });
+      return res.status(404).json({ error: "Service category not found" });
     }
-    res.json({ message: 'Service category deleted successfully', deletedCount: result.deletedCount });
+    res.json({
+      message: "Service category deleted successfully",
+      deletedCount: result.deletedCount,
+    });
   } catch (err) {
-    res.status(400).json({ error: 'Invalid ID format' });
+    res.status(400).json({ error: "Invalid ID format" });
   }
 });
 
 // Admin login
-router.post('/login', async (req, res) => {
+router.post("/login", async (req, res) => {
   const db = getDb();
   const { email, password } = req.body;
 
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+    return res.status(400).json({ error: "Email and password are required" });
   }
 
   try {
-    const admin = await db.collection('admin').findOne({ email });
+    const admin = await db.collection("admin").findOne({ email });
 
     if (!admin) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: "Invalid credentials" });
     }
 
     const passwordMatch = await bcrypt.compare(password, admin.password);
 
     if (!passwordMatch) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: "Invalid credentials" });
     }
 
     // Update last login
-    await db.collection('admin').updateOne(
-      { _id: admin._id },
-      { $set: { lastLogin: new Date() } }
-    );
+    await db
+      .collection("admin")
+      .updateOne({ _id: admin._id }, { $set: { lastLogin: new Date() } });
 
     // Generate JWT token
     const token = jwt.sign(
-      { id: admin._id, email: admin.email, name: admin.name },
+      { id: admin._id, email: admin.email, role: "admin" },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: "7d" },
     );
 
     res.json({
-      message: 'Login successful',
+      message: "Login successful",
       token,
       admin: {
         id: admin._id,
         name: admin.name,
-        email: admin.email
-      }
+        email: admin.email,
+      },
     });
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: "Server error" });
   }
 });
 
 // Get single admin by id (MOVED TO END to avoid route conflicts)
-router.get('/:id', async (req, res) => {
+router.get("/:id", async (req, res) => {
   const db = getDb();
-  const admin = await db.collection('admin').findOne({ _id: new ObjectId(req.params.id) });
-  if (!admin) return res.status(404).json({ error: 'Admin not found' });
+  const admin = await db
+    .collection("admin")
+    .findOne({ _id: new ObjectId(req.params.id) });
+  if (!admin) return res.status(404).json({ error: "Admin not found" });
   res.json({ admin });
+});
+
+// ── Photographers management ──────────────────────────────────────────────────
+
+router.get("/photographers", async (req, res) => {
+  const db = getDb();
+  try {
+    const { status } = req.query;
+    const filter = {};
+    if (status && status !== "all") filter.status = status;
+    const photographers = await db
+      .collection("photographers")
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json({ photographers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch("/photographers/:id/status", async (req, res) => {
+  const db = getDb();
+  try {
+    const { status } = req.body;
+    if (!["active", "suspended", "pending"].includes(status)) {
+      return res
+        .status(400)
+        .json({ error: "status must be active, suspended or pending" });
+    }
+    await db
+      .collection("photographers")
+      .updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: { status, updatedAt: new Date() } },
+      );
+    res.json({ message: `Photographer status set to ${status}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete("/photographers/:id", async (req, res) => {
+  const db = getDb();
+  try {
+    await db
+      .collection("photographers")
+      .deleteOne({ _id: new ObjectId(req.params.id) });
+    res.json({ message: "Photographer deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get("/users", async (req, res) => {
+  const db = getDb();
+  try {
+    const users = await db
+      .collection("users")
+      .find({}, { projection: { password: 0, tempPassword: 0 } })
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json({ users });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
