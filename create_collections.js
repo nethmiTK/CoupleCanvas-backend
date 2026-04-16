@@ -323,6 +323,10 @@ async function createAlbumTemplates(db) {
 
 async function createTemplatePages(db) {
   const template = await db.collection('album_templates').findOne({});
+
+if (!template) {
+  throw new Error("❌ No template found. Cannot create template pages.");
+}
   const pages = [
     {
       templateId: template ? template._id : null,
@@ -337,7 +341,7 @@ async function createTemplatePages(db) {
       createdAt: new Date()
     },
     {
-      templateId: template ? template._id : null,
+      templateId: template._id,
       pageNumber: 2,
       isCover: false,
       layoutJson: {
@@ -820,15 +824,22 @@ async function main() {
   await client.connect();
   const db = client.db(dbName);
 
-  for (const name of collections) {
-    // Insert a dummy doc to create the collection
-    await db.collection(name).insertOne({ _init: true });
-    console.log(`Created collection: ${name}`);
-  }
+ for (const name of collections) {
+  await db.createCollection(name).catch(() => {});
+  console.log(`Ensured collection: ${name}`);
+}
 
   // Create unique indexes as per requirements
   // template_pages: unique on (templateId, pageNumber)
-  await db.collection('template_pages').createIndex({ templateId: 1, pageNumber: 1 }, { unique: true });
+  await db.collection('template_pages').createIndex(
+  { templateId: 1, pageNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      templateId: { $exists: true }
+    }
+  }
+);
   // album_pages: unique on (albumId, pageNumber)
   await db.collection('album_pages').createIndex({ albumId: 1, pageNumber: 1 }, { unique: true });
   // album_page_slots: unique on (albumPageId, slotKey)
