@@ -42,6 +42,7 @@ const dbName = process.env.MONGODB_DB_NAME;
 const collections = [
   'users',
   'customers',
+  'photographers',
   'vendor_profiles',
   'vendor_products',
   'vendor_proposal',
@@ -442,6 +443,20 @@ async function createAdminCollection(db) {
   console.log('admin collection created and seeded!');
 }
 
+async function createPhotographersCollection(db) {
+  const existing = await db.collection('photographers').countDocuments({ _init: { $exists: false } });
+  if (existing > 0) {
+    console.log('photographers collection already has real data, skipping seed.');
+    return;
+  }
+
+  await db.collection('photographers').createIndex(
+    { email: 1 },
+    { unique: true, background: true }
+  );
+
+  console.log('photographers collection ready with unique email index!');
+}
 
 async function createServiceCategories(db) {
   const categories = [
@@ -819,12 +834,21 @@ async function main() {
   // album_page_slots: unique on (albumPageId, slotKey)
   await db.collection('album_page_slots').createIndex({ albumPageId: 1, slotKey: 1 }, { unique: true });
 
+  // New indexes for photographer/user/album scenario
+  await db.collection('photographers').createIndex({ email: 1 }, { unique: true });
+  await db.collection('users').createIndex({ email: 1 }, { unique: true });
+  await db.collection('albums').createIndex({ shareToken: 1 }, { unique: true, sparse: true });
+  await db.collection('albums').createIndex({ photographer_id: 1 });
+  await db.collection('albums').createIndex({ 'coupleAccess.email': 1 });
+  console.log('New photographer/user/album indexes created!');
+
 
 
   await createServiceCategories(db);
   await createSubPlanCollection(db);
   await createVendorCollection(db);
   await createAdminCollection(db);
+  await createPhotographersCollection(db);
   await createServicesCollection(db);
   await createVendorsCollection(db);
   await createAlbumVendorsCollection(db);
