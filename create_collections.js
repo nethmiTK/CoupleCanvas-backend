@@ -1,35 +1,3 @@
-// Seed the 'services' collection with sample data
-async function createServicesCollection(db) {
-  const services = [
-    {
-      name: 'Wedding Photography',
-      description: 'Capture your special moments with our professional wedding photography service.',
-      image: 'uploads/services/photo1.jpg',
-      createdAt: new Date(),
-    },
-    {
-      name: 'Venue Decoration',
-      description: 'Beautiful and creative decoration for your wedding venue.',
-      image: 'uploads/services/decor1.jpg',
-      createdAt: new Date(),
-    },
-    {
-      name: 'Catering',
-      description: 'Delicious food and catering services for your guests.',
-      image: 'uploads/services/catering1.jpg',
-      createdAt: new Date(),
-    },
-    {
-      name: 'Music Band',
-      description: 'Live music band to entertain your wedding party.',
-      image: 'uploads/services/music1.jpg',
-      createdAt: new Date(),
-    },
-  ];
-  await db.collection('services').deleteMany({});
-  await db.collection('services').insertMany(services);
-  console.log('services collection created and seeded!');
-}
 // Run this script once to auto-create all required MongoDB collections
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
@@ -37,7 +5,6 @@ const bcrypt = require('bcrypt');
 
 const uri = process.env.MONGODB_URI;
 const dbName = process.env.MONGODB_DB_NAME;
-
 
 const collections = [
   'users',
@@ -70,17 +37,101 @@ const collections = [
   'template_categories',
   'album_templates',
   'template_pages',
-  'album_pages'
-  , 'template_extra_layout_sequence'
-  , 'uploads'
-  , 'album_page_slots'
-  , 'layout_presets'
-  , 'vendor_subscriptions'
+  'album_pages',
+  'template_extra_layout_sequence',
+  'uploads',
+  'album_page_slots',
+  'layout_presets',
+  'vendor_subscriptions',
 ];
 
-// --- Album Template System Collections ---
+// ============================================================
+// HELPER: Safely create index with duplicate detection
+// ============================================================
+async function createIndexSafely(collection, indexSpec, options = {}) {
+  try {
+    // Check if index already exists
+    const indexInfo = await collection.getIndexes();
+    const indexName = options.name || Object.keys(indexSpec).join('_');
+    
+    if (indexInfo[indexName]) {
+      console.log(`   ℹ️  Index already exists: ${indexName}`);
+      return;
+    }
+    
+    await collection.createIndex(indexSpec, options);
+    console.log(`   ✅ Created index: ${indexName}`);
+  } catch (error) {
+    if (error.code === 85) { // Index already exists with different options
+      console.log(`   ⚠️  Index exists (different options): ${error.message.split(':')[0]}`);
+    } else {
+      console.error(`   ❌ Error creating index:`, error.message);
+    }
+  }
+}
 
-// Layout Presets - Reusable page layout designs for templates
+// ============================================================
+// HELPER: Check if collection has real data (not seed data)
+// ============================================================
+async function hasRealData(collection) {
+  try {
+    const count = await collection.countDocuments({
+      _seedData: { $exists: false } // Mark seed data with this flag
+    });
+    return count > 0;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================================
+// COLLECTION CREATION FUNCTIONS
+// ============================================================
+
+async function createServicesCollection(db) {
+  const services = [
+    {
+      name: 'Wedding Photography',
+      description: 'Capture your special moments with our professional wedding photography service.',
+      image: 'uploads/services/photo1.jpg',
+      _seedData: true, // Mark as seed data
+      createdAt: new Date(),
+    },
+    {
+      name: 'Venue Decoration',
+      description: 'Beautiful and creative decoration for your wedding venue.',
+      image: 'uploads/services/decor1.jpg',
+      _seedData: true,
+      createdAt: new Date(),
+    },
+    {
+      name: 'Catering',
+      description: 'Delicious food and catering services for your guests.',
+      image: 'uploads/services/catering1.jpg',
+      _seedData: true,
+      createdAt: new Date(),
+    },
+    {
+      name: 'Music Band',
+      description: 'Live music band to entertain your wedding party.',
+      image: 'uploads/services/music1.jpg',
+      _seedData: true,
+      createdAt: new Date(),
+    },
+  ];
+
+  // Only seed if no real data exists
+  const hasReal = await hasRealData(db.collection('services'));
+  if (hasReal) {
+    console.log('📍 services: Has real data, skipping seed');
+    return;
+  }
+
+  await db.collection('services').deleteMany({ _seedData: true }); // Only delete seed data
+  await db.collection('services').insertMany(services);
+  console.log('📍 services: Collection seeded');
+}
+
 async function createLayoutPresets(db) {
   const presets = [
     {
@@ -97,6 +148,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#FFFFFF',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -115,6 +167,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#FFFFFF',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -134,6 +187,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#FFFFFF',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -154,6 +208,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#FFFFFF',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -176,6 +231,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#FFFFFF',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -194,6 +250,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#FFFFFF',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -214,6 +271,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#F9FAFB',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -232,6 +290,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#FFFFFF',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -253,6 +312,7 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#FFFFFF',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     },
@@ -271,13 +331,21 @@ async function createLayoutPresets(db) {
       },
       bgColor: '#F3F4F6',
       status: 'active',
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     }
   ];
-  await db.collection('layout_presets').deleteMany({});
+
+  const hasReal = await hasRealData(db.collection('layout_presets'));
+  if (hasReal) {
+    console.log('📍 layout_presets: Has real data, skipping seed');
+    return;
+  }
+
+  await db.collection('layout_presets').deleteMany({ _seedData: true });
   await db.collection('layout_presets').insertMany(presets);
-  console.log('layout_presets collection created and seeded!');
+  console.log('📍 layout_presets: Collection seeded');
 }
 
 async function createTemplateCategories(db) {
@@ -286,22 +354,37 @@ async function createTemplateCategories(db) {
       name: "Wedding",
       description: "Wedding albums",
       status: "active",
+      _seedData: true,
       createdAt: new Date()
     },
     {
       name: "Birthday",
       description: "Birthday albums",
       status: "active",
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('template_categories').deleteMany({});
+
+  const hasReal = await hasRealData(db.collection('template_categories'));
+  if (hasReal) {
+    console.log('📍 template_categories: Has real data, skipping seed');
+    return;
+  }
+
+  await db.collection('template_categories').deleteMany({ _seedData: true });
   await db.collection('template_categories').insertMany(categories);
-  console.log('template_categories collection created and seeded!');
+  console.log('📍 template_categories: Collection seeded');
 }
 
 async function createAlbumTemplates(db) {
-  const category = await db.collection('template_categories').findOne({});
+  const hasReal = await hasRealData(db.collection('album_templates'));
+  if (hasReal) {
+    console.log('📍 album_templates: Has real data, skipping seed');
+    return;
+  }
+
+  const category = await db.collection('template_categories').findOne({ _seedData: true });
   const templates = [
     {
       name: "Royal Wedding Album",
@@ -312,24 +395,36 @@ async function createAlbumTemplates(db) {
       description: "Premium wedding template",
       previewImage: "uploads/template1.jpg",
       status: "active",
+      _seedData: true,
       createdAt: new Date(),
       updatedAt: new Date()
     }
   ];
-  await db.collection('album_templates').deleteMany({});
+  await db.collection('album_templates').deleteMany({ _seedData: true });
   await db.collection('album_templates').insertMany(templates);
-  console.log('album_templates collection created and seeded!');
+  console.log('📍 album_templates: Collection seeded');
 }
 
+// ✅ FIXED: Proper template pages creation
 async function createTemplatePages(db) {
-  const template = await db.collection('album_templates').findOne({});
+  const hasReal = await hasRealData(db.collection('template_pages'));
+  if (hasReal) {
+    console.log('📍 template_pages: Has real data, skipping seed');
+    return;
+  }
 
-if (!template) {
-  throw new Error("❌ No template found. Cannot create template pages.");
-}
+  // Get the first seed template (not user-created templates)
+  const template = await db.collection('album_templates').findOne({ _seedData: true });
+
+  if (!template) {
+    console.log('📍 template_pages: No seed template found, skipping');
+    return;
+  }
+
+  // ✅ FIX: Only create pages for templates that exist
   const pages = [
     {
-      templateId: template ? template._id : null,
+      templateId: template._id, // ✅ Use actual template ID (not null)
       pageNumber: 1,
       isCover: true,
       layoutJson: {
@@ -338,10 +433,11 @@ if (!template) {
           { type: "text", text: "Wedding Day" }
         ]
       },
+      _seedData: true,
       createdAt: new Date()
     },
     {
-      templateId: template._id,
+      templateId: template._id, // ✅ Use actual template ID (not null)
       pageNumber: 2,
       isCover: false,
       layoutJson: {
@@ -349,17 +445,26 @@ if (!template) {
           { type: "image", x: 50, y: 50, w: 300, h: 200 }
         ]
       },
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('template_pages').deleteMany({});
+
+  await db.collection('template_pages').deleteMany({ _seedData: true });
   await db.collection('template_pages').insertMany(pages);
-  console.log('template_pages collection created and seeded!');
+  console.log('📍 template_pages: Collection seeded');
 }
 
 async function createAlbums(db) {
+  const hasReal = await hasRealData(db.collection('albums'));
+  if (hasReal) {
+    console.log('📍 albums: Has real data, skipping seed');
+    return;
+  }
+
   const vendor = await db.collection('vendors').findOne({});
-  const template = await db.collection('album_templates').findOne({});
+  const template = await db.collection('album_templates').findOne({ _seedData: true });
+  
   const albums = [
     {
       vendorId: vendor ? vendor._id : null,
@@ -368,19 +473,33 @@ async function createAlbums(db) {
       customerName: "Nethmi",
       eventDate: new Date(),
       status: "draft",
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('albums').deleteMany({});
+
+  await db.collection('albums').deleteMany({ _seedData: true });
   await db.collection('albums').insertMany(albums);
-  console.log('albums collection created and seeded!');
+  console.log('📍 albums: Collection seeded');
 }
 
 async function createAlbumPages(db) {
-  const album = await db.collection('albums').findOne({});
+  const hasReal = await hasRealData(db.collection('album_pages'));
+  if (hasReal) {
+    console.log('📍 album_pages: Has real data, skipping seed');
+    return;
+  }
+
+  const album = await db.collection('albums').findOne({ _seedData: true });
+  
+  if (!album) {
+    console.log('📍 album_pages: No seed album found, skipping');
+    return;
+  }
+
   const pages = [
     {
-      albumId: album ? album._id : null,
+      albumId: album._id,
       pageNumber: 1,
       layoutJson: {
         elements: [
@@ -388,17 +507,23 @@ async function createAlbumPages(db) {
         ]
       },
       images: [],
+      _seedData: true,
       updatedAt: new Date()
     }
   ];
-  await db.collection('album_pages').deleteMany({});
+
+  await db.collection('album_pages').deleteMany({ _seedData: true });
   await db.collection('album_pages').insertMany(pages);
-  console.log('album_pages collection created and seeded!');
+  console.log('📍 album_pages: Collection seeded');
 }
 
- 
-
 async function createVendorCollection(db) {
+  const hasReal = await hasRealData(db.collection('vendor'));
+  if (hasReal) {
+    console.log('📍 vendor: Has real data, skipping seed');
+    return;
+  }
+
   const vendors = [
     {
       id: 1,
@@ -411,7 +536,8 @@ async function createVendorCollection(db) {
       phone_no: '0712345678',
       password: await bcrypt.hash('vendorpass1', 10),
       sex: 'male',
-      payment_slip: 'slip1.png'
+      payment_slip: 'slip1.png',
+      _seedData: true
     },
     {
       id: 2,
@@ -424,51 +550,63 @@ async function createVendorCollection(db) {
       phone_no: '0723456789',
       password: await bcrypt.hash('vendorpass2', 10),
       sex: 'female',
-      payment_slip: 'slip2.png'
+      payment_slip: 'slip2.png',
+      _seedData: true
     }
   ];
-  await db.collection('vendor').deleteMany({});
+
+  await db.collection('vendor').deleteMany({ _seedData: true });
   await db.collection('vendor').insertMany(vendors);
-  console.log('vendor collection created and seeded!');
+  console.log('📍 vendor: Collection seeded');
 }
 
 async function createAdminCollection(db) {
+  const hasReal = await hasRealData(db.collection('admin'));
+  if (hasReal) {
+    console.log('📍 admin: Has real data, skipping seed');
+    return;
+  }
+
   const password = await bcrypt.hash('admin123', 10);
   const admin = {
     id: 1,
     name: 'Super Admin',
     email: 'admin@example.com',
     password,
+    _seedData: true,
     created_at: new Date(),
     last_login: null
   };
-  await db.collection('admin').deleteMany({}); // Clear if exists
+
+  await db.collection('admin').deleteMany({ _seedData: true });
   await db.collection('admin').insertOne(admin);
-  console.log('admin collection created and seeded!');
+  console.log('📍 admin: Collection seeded');
 }
 
 async function createPhotographersCollection(db) {
-  const existing = await db.collection('photographers').countDocuments({ _init: { $exists: false } });
+  const existing = await db.collection('photographers').countDocuments({ _seedData: { $exists: false } });
   if (existing > 0) {
-    console.log('photographers collection already has real data, skipping seed.');
+    console.log('📍 photographers: Has real data, skipping seed');
     return;
   }
 
-  await db.collection('photographers').createIndex(
-    { email: 1 },
-    { unique: true, background: true }
-  );
-
-  console.log('photographers collection ready with unique email index!');
+  console.log('📍 photographers: Collection ready');
 }
 
 async function createServiceCategories(db) {
+  const hasReal = await hasRealData(db.collection('service_categories'));
+  if (hasReal) {
+    console.log('📍 service_categories: Has real data, skipping seed');
+    return;
+  }
+
   const categories = [
     {
       name: 'Wedding Photography',
       description: 'Professional wedding photography services',
       icon: '📸',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -476,6 +614,7 @@ async function createServiceCategories(db) {
       description: 'Wedding venue booking services',
       icon: '🏛️',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -483,6 +622,7 @@ async function createServiceCategories(db) {
       description: 'Wedding catering and food services',
       icon: '🍽️',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -490,15 +630,23 @@ async function createServiceCategories(db) {
       description: 'Wedding decoration and arrangement services',
       icon: '🎉',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('service_categories').deleteMany({});
+
+  await db.collection('service_categories').deleteMany({ _seedData: true });
   await db.collection('service_categories').insertMany(categories);
-  console.log('service_categories collection created and seeded!');
+  console.log('📍 service_categories: Collection seeded');
 }
 
 async function createSubPlanCollection(db) {
+  const hasReal = await hasRealData(db.collection('sub_plan'));
+  if (hasReal) {
+    console.log('📍 sub_plan: Has real data, skipping seed');
+    return;
+  }
+
   const plans = [
     {
       name: 'Basic Service',
@@ -508,6 +656,7 @@ async function createSubPlanCollection(db) {
       vendorType: 'service',
       description: 'Perfect for getting started',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -518,6 +667,7 @@ async function createSubPlanCollection(db) {
       vendorType: 'service',
       description: 'Great for growing businesses',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -528,6 +678,7 @@ async function createSubPlanCollection(db) {
       vendorType: 'service',
       description: 'For established vendors',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -538,6 +689,7 @@ async function createSubPlanCollection(db) {
       vendorType: 'album',
       description: 'Start your album portfolio',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -548,6 +700,7 @@ async function createSubPlanCollection(db) {
       vendorType: 'album',
       description: 'Professional album services',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -558,6 +711,7 @@ async function createSubPlanCollection(db) {
       vendorType: 'product',
       description: 'Start selling products',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -568,17 +722,23 @@ async function createSubPlanCollection(db) {
       vendorType: 'product',
       description: 'Full-featured product selling',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('sub_plan').deleteMany({});
+
+  await db.collection('sub_plan').deleteMany({ _seedData: true });
   await db.collection('sub_plan').insertMany(plans);
-  console.log('sub_plan collection created and seeded!');
+  console.log('📍 sub_plan: Collection seeded');
 }
 
 async function createVendorsCollection(db) {
-  // This will be populated by registration endpoint
-  // Adding some dummy vendors for testing
+  const hasReal = await hasRealData(db.collection('vendors'));
+  if (hasReal) {
+    console.log('📍 vendors: Has real data, skipping seed');
+    return;
+  }
+
   const dummyVendors = [
     {
       email: 'album@example.com',
@@ -591,6 +751,7 @@ async function createVendorsCollection(db) {
       subscriptionPlan: 'Basic Album',
       planPrice: 3000,
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -604,6 +765,7 @@ async function createVendorsCollection(db) {
       subscriptionPlan: 'Basic Service',
       planPrice: 5000,
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -617,6 +779,7 @@ async function createVendorsCollection(db) {
       subscriptionPlan: 'Basic Product',
       planPrice: 4000,
       status: 'pending',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -630,16 +793,23 @@ async function createVendorsCollection(db) {
       subscriptionPlan: 'Basic Service',
       planPrice: 5000,
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('vendors').deleteMany({});
+
+  await db.collection('vendors').deleteMany({ _seedData: true });
   await db.collection('vendors').insertMany(dummyVendors);
-  console.log('vendors collection created with dummy data!');
+  console.log('📍 vendors: Collection seeded');
 }
 
 async function createAlbumVendorsCollection(db) {
-  // Schema: { vendor_id, name, profilePic, whatsappNo, slipPhoto, status, createdAt }
+  const hasReal = await hasRealData(db.collection('album_vendors'));
+  if (hasReal) {
+    console.log('📍 album_vendors: Has real data, skipping seed');
+    return;
+  }
+
   const albumVendors = [
     {
       vendor_id: new (require('mongodb')).ObjectId(),
@@ -648,6 +818,7 @@ async function createAlbumVendorsCollection(db) {
       whatsappNo: '+94712345678',
       slipPhoto: 'uploads/slips/slip_album_1.jpg',
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -657,6 +828,7 @@ async function createAlbumVendorsCollection(db) {
       whatsappNo: '+94723456789',
       slipPhoto: 'uploads/slips/slip_album_2.jpg',
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -666,16 +838,23 @@ async function createAlbumVendorsCollection(db) {
       whatsappNo: '+94734567890',
       slipPhoto: 'uploads/slips/slip_album_3.jpg',
       status: 'pending',
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('album_vendors').deleteMany({});
+
+  await db.collection('album_vendors').deleteMany({ _seedData: true });
   await db.collection('album_vendors').insertMany(albumVendors);
-  console.log('album_vendors collection created with dummy data!');
+  console.log('📍 album_vendors: Collection seeded');
 }
 
 async function createServiceVendorsCollection(db) {
-  // Schema: { vendor_id, whatsappNo, profilePic, slipPhoto, selectedServices[], status, createdAt }
+  const hasReal = await hasRealData(db.collection('service_vendors'));
+  if (hasReal) {
+    console.log('📍 service_vendors: Has real data, skipping seed');
+    return;
+  }
+
   const serviceVendors = [
     {
       vendor_id: new (require('mongodb')).ObjectId(),
@@ -684,6 +863,7 @@ async function createServiceVendorsCollection(db) {
       slipPhoto: 'uploads/slips/slip_service_1.jpg',
       selectedServices: ['Wedding Photography', 'Wedding Venue'],
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -693,6 +873,7 @@ async function createServiceVendorsCollection(db) {
       slipPhoto: 'uploads/slips/slip_service_2.jpg',
       selectedServices: ['Catering', 'Decoration'],
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -702,16 +883,23 @@ async function createServiceVendorsCollection(db) {
       slipPhoto: 'uploads/slips/slip_service_3.jpg',
       selectedServices: ['Wedding Photography', 'Music Band', 'Catering'],
       status: 'pending',
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('service_vendors').deleteMany({});
+
+  await db.collection('service_vendors').deleteMany({ _seedData: true });
   await db.collection('service_vendors').insertMany(serviceVendors);
-  console.log('service_vendors collection created with dummy data!');
+  console.log('📍 service_vendors: Collection seeded');
 }
 
 async function createProductVendorsCollection(db) {
-  // Schema: { vendor_id, companyName, logoPic, description, whatsappNo, slipPhoto, status, createdAt }
+  const hasReal = await hasRealData(db.collection('product_vendors'));
+  if (hasReal) {
+    console.log('📍 product_vendors: Has real data, skipping seed');
+    return;
+  }
+
   const productVendors = [
     {
       vendor_id: new (require('mongodb')).ObjectId(),
@@ -721,6 +909,7 @@ async function createProductVendorsCollection(db) {
       whatsappNo: '+94712444555',
       slipPhoto: 'uploads/slips/slip_product_1.jpg',
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -731,6 +920,7 @@ async function createProductVendorsCollection(db) {
       whatsappNo: '+94723555666',
       slipPhoto: 'uploads/slips/slip_product_2.jpg',
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -741,16 +931,23 @@ async function createProductVendorsCollection(db) {
       whatsappNo: '+94734666777',
       slipPhoto: 'uploads/slips/slip_product_3.jpg',
       status: 'pending',
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('product_vendors').deleteMany({});
+
+  await db.collection('product_vendors').deleteMany({ _seedData: true });
   await db.collection('product_vendors').insertMany(productVendors);
-  console.log('product_vendors collection created with dummy data!');
+  console.log('📍 product_vendors: Collection seeded');
 }
 
 async function createProposalVendorsCollection(db) {
-  // Schema: { vendor_id, name, profilePic, whatsappNo, slipPhoto, status, createdAt }
+  const hasReal = await hasRealData(db.collection('proposal_vendors'));
+  if (hasReal) {
+    console.log('📍 proposal_vendors: Has real data, skipping seed');
+    return;
+  }
+
   const proposalVendors = [
     {
       vendor_id: new (require('mongodb')).ObjectId(),
@@ -759,6 +956,7 @@ async function createProposalVendorsCollection(db) {
       whatsappNo: '+94712777888',
       slipPhoto: 'uploads/slips/slip_proposal_1.jpg',
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -768,6 +966,7 @@ async function createProposalVendorsCollection(db) {
       whatsappNo: '+94723888999',
       slipPhoto: 'uploads/slips/slip_proposal_2.jpg',
       status: 'approved',
+      _seedData: true,
       createdAt: new Date()
     },
     {
@@ -777,41 +976,55 @@ async function createProposalVendorsCollection(db) {
       whatsappNo: '+94734999000',
       slipPhoto: 'uploads/slips/slip_proposal_3.jpg',
       status: 'pending',
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('proposal_vendors').deleteMany({});
+
+  await db.collection('proposal_vendors').deleteMany({ _seedData: true });
   await db.collection('proposal_vendors').insertMany(proposalVendors);
-  console.log('proposal_vendors collection created with dummy data!');
+  console.log('📍 proposal_vendors: Collection seeded');
 }
 
 async function createVendorServicesCollection(db) {
-  // Schema: { vendor_id, service_id, status, createdAt }
+  const hasReal = await hasRealData(db.collection('vendor_services'));
+  if (hasReal) {
+    console.log('📍 vendor_services: Has real data, skipping seed');
+    return;
+  }
+
   const vendorServices = [
     {
       vendor_id: new (require('mongodb')).ObjectId(),
       service_id: 'Wedding Photography',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
       vendor_id: new (require('mongodb')).ObjectId(),
       service_id: 'Catering',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     },
     {
       vendor_id: new (require('mongodb')).ObjectId(),
       service_id: 'Music Band',
       status: 'active',
+      _seedData: true,
       createdAt: new Date()
     }
   ];
-  await db.collection('vendor_services').deleteMany({});
+
+  await db.collection('vendor_services').deleteMany({ _seedData: true });
   await db.collection('vendor_services').insertMany(vendorServices);
-  console.log('vendor_services collection created with dummy data!');
+  console.log('📍 vendor_services: Collection seeded');
 }
 
+// ============================================================
+// MAIN FUNCTION
+// ============================================================
 
 async function main() {
   const client = new MongoClient(uri, {
@@ -821,63 +1034,122 @@ async function main() {
     connectTimeoutMS: 30000,
     minPoolSize: 1,
   });
-  await client.connect();
-  const db = client.db(dbName);
 
- for (const name of collections) {
-  await db.createCollection(name).catch(() => {});
-  console.log(`Ensured collection: ${name}`);
-}
+  try {
+    await client.connect();
+    console.log('✅ Connected to MongoDB\n');
+    const db = client.db(dbName);
 
-  // Create unique indexes as per requirements
-  // template_pages: unique on (templateId, pageNumber)
-  await db.collection('template_pages').createIndex(
-  { templateId: 1, pageNumber: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      templateId: { $exists: true }
+    // Ensure all collections exist
+    console.log('📦 Creating/Ensuring collections...');
+    for (const name of collections) {
+      await db.createCollection(name).catch(() => {});
     }
+    console.log('✅ All collections ready\n');
+
+    // Create indexes
+    console.log('🔑 Setting up indexes...');
+    
+    // template_pages: unique on (templateId, pageNumber) - but NOT for null templateId
+    await createIndexSafely(
+      db.collection('template_pages'),
+      { templateId: 1, pageNumber: 1 },
+      {
+        unique: true,
+        sparse: true,  // ✅ This ignores documents where templateId is null
+        partialFilterExpression: {
+          templateId: { $type: 'objectId' } // Only index documents with valid ObjectId
+        },
+        name: 'templateId_1_pageNumber_1'
+      }
+    );
+
+    // album_pages: unique on (albumId, pageNumber)
+    await createIndexSafely(
+      db.collection('album_pages'),
+      { albumId: 1, pageNumber: 1 },
+      { 
+        unique: true,
+        sparse: true,
+        name: 'albumId_1_pageNumber_1'
+      }
+    );
+
+    // album_page_slots: unique on (albumPageId, slotKey)
+    await createIndexSafely(
+      db.collection('album_page_slots'),
+      { albumPageId: 1, slotKey: 1 },
+      { 
+        unique: true,
+        sparse: true,
+        name: 'albumPageId_1_slotKey_1'
+      }
+    );
+
+    // Photographer/User/Album Scenario Indexes
+    await createIndexSafely(
+      db.collection('photographers'),
+      { email: 1 },
+      { unique: true, sparse: true, name: 'email_1' }
+    );
+
+    await createIndexSafely(
+      db.collection('users'),
+      { email: 1 },
+      { unique: true, sparse: true, name: 'email_1' }
+    );
+
+    await createIndexSafely(
+      db.collection('albums'),
+      { shareToken: 1 },
+      { unique: true, sparse: true, name: 'shareToken_1' }
+    );
+
+    await createIndexSafely(
+      db.collection('albums'),
+      { photographer_id: 1 },
+      { name: 'photographer_id_1' }
+    );
+
+    await createIndexSafely(
+      db.collection('albums'),
+      { 'coupleAccess.email': 1 },
+      { name: 'coupleAccess.email_1' }
+    );
+
+    console.log('✅ All indexes created\n');
+
+    // Seed collections
+    console.log('🌱 Seeding collections...');
+    await createServiceCategories(db);
+    await createSubPlanCollection(db);
+    await createVendorCollection(db);
+    await createAdminCollection(db);
+    await createPhotographersCollection(db);
+    await createServicesCollection(db);
+    await createVendorsCollection(db);
+    await createAlbumVendorsCollection(db);
+    await createServiceVendorsCollection(db);
+    await createProductVendorsCollection(db);
+    await createProposalVendorsCollection(db);
+    await createVendorServicesCollection(db);
+
+    // Album Template System
+    await createLayoutPresets(db);
+    await createTemplateCategories(db);
+    await createAlbumTemplates(db);
+    await createTemplatePages(db);
+    await createAlbums(db);
+    await createAlbumPages(db);
+
+    console.log('\n✅ All collections seeded successfully!');
+
+  } catch (error) {
+    console.error('❌ Error:', error);
+    process.exit(1);
+  } finally {
+    await client.close();
   }
-);
-  // album_pages: unique on (albumId, pageNumber)
-  await db.collection('album_pages').createIndex({ albumId: 1, pageNumber: 1 }, { unique: true });
-  // album_page_slots: unique on (albumPageId, slotKey)
-  await db.collection('album_page_slots').createIndex({ albumPageId: 1, slotKey: 1 }, { unique: true });
-
-  // New indexes for photographer/user/album scenario
-  await db.collection('photographers').createIndex({ email: 1 }, { unique: true });
-  await db.collection('users').createIndex({ email: 1 }, { unique: true });
-  await db.collection('albums').createIndex({ shareToken: 1 }, { unique: true, sparse: true });
-  await db.collection('albums').createIndex({ photographer_id: 1 });
-  await db.collection('albums').createIndex({ 'coupleAccess.email': 1 });
-  console.log('New photographer/user/album indexes created!');
-
-
-
-  await createServiceCategories(db);
-  await createSubPlanCollection(db);
-  await createVendorCollection(db);
-  await createAdminCollection(db);
-  await createPhotographersCollection(db);
-  await createServicesCollection(db);
-  await createVendorsCollection(db);
-  await createAlbumVendorsCollection(db);
-  await createServiceVendorsCollection(db);
-  await createProductVendorsCollection(db);
-  await createProposalVendorsCollection(db);
-  await createVendorServicesCollection(db);
-
-  // Album Template System
-  await createLayoutPresets(db);
-  await createTemplateCategories(db);
-  await createAlbumTemplates(db);
-  await createTemplatePages(db);
-  await createAlbums(db);
-  await createAlbumPages(db);
-
-  await client.close();
-  console.log('All collections created!');
 }
 
-main().catch(console.error);
+main();
