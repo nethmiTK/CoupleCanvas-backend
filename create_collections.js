@@ -50,20 +50,21 @@ const collections = [
 // ============================================================
 async function createIndexSafely(collection, indexSpec, options = {}) {
   try {
-    // Check if index already exists
-    const indexInfo = await collection.getIndexes();
+    const indexes = await collection.indexes(); // ✅ correct method
     const indexName = options.name || Object.keys(indexSpec).join('_');
-    
-    if (indexInfo[indexName]) {
+
+    const exists = indexes.some(idx => idx.name === indexName);
+
+    if (exists) {
       console.log(`   ℹ️  Index already exists: ${indexName}`);
       return;
     }
-    
+
     await collection.createIndex(indexSpec, options);
     console.log(`   ✅ Created index: ${indexName}`);
   } catch (error) {
-    if (error.code === 85) { // Index already exists with different options
-      console.log(`   ⚠️  Index exists (different options): ${error.message.split(':')[0]}`);
+    if (error.code === 85) {
+      console.log(`   ⚠️  Index exists (different options)`);
     } else {
       console.error(`   ❌ Error creating index:`, error.message);
     }
