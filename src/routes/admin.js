@@ -726,70 +726,617 @@ router.get("/:id", async (req, res) => {
   res.json({ admin });
 });
 
-// ── Photographers management ──────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// PHOTOGRAPHER MANAGEMENT
+// ════════════════════════════════════════════════════════════════
 
+// GET /admin/photographers
+// List all photographers with search, filter by status, pagination
 router.get("/photographers", async (req, res) => {
   const db = getDb();
   try {
-    const { status } = req.query;
+    const { status, search } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
     const filter = {};
     if (status && status !== "all") filter.status = status;
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { phone: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const total = await db.collection("photographers").countDocuments(filter);
+
     const photographers = await db
       .collection("photographers")
-      .find(filter)
+      .find(filter, { projection: { password: 0 } })
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .toArray();
-    res.json({ photographers });
+
+    // For each photographer attach album count
+    const enriched = await Promise.all(
+      photographers.map(async (p) => {
+        const albumCount = await db
+          .collection("albums")
+          .countDocuments({ photographer_id: p._id });
+        return { ...p, albumCount };
+      })
+    );
+
+    res.json({
+      success: true,
+      photographers: enriched,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching photographers:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /admin/photographers/pending
+// List only pending photographers waiting for approval
+router.get("/photographers/pending", async (req, res) => {
+  const db = getDb();
+  try {
+    const photographers = await db
+      .collection("photographers")
+      .find({ status: "pending" }, { projection: { password: 0 } })
+      .sort({ createdAt: 1 })
+      .toArray();
+
+    res.json({ success: true, photographers, total: photographers.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// GET /admin/photographers/:id
+// Get full details of one photographer including their albums and couple access stats
+router.get("/photographers/:id", async (req, res) => {
+  const db = getDb();
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid photographer ID" });
+    }
+
+    const photographer = await db
+      .collection("photographers")
+      .findOne(
+        { _id: new ObjectId(req.params.id) },
+        { projection: { password: 0 } }
+      );
+
+    if (!photographer) {
+      return res.status(404).json({ error: "Photographer not found" });
+    }
+
+    // Get all albums by this photographer
+    const albums = await db
+      .collection("albums")
+      .find(
+        { photographer_id: new ObjectId(req.params.id) },
+        {
+          projection: {
+            title: 1,
+            description: 1,
+            shareEnabled: 1,
+            coupleAccess: 1,
+            created_at: 1,
+            updated_at: 1,
+          },
+        }
+      )
+      .sort({ created_at: -1 })
+      .toArray();
+
+    // Calculate stats
+    const totalAlbums = albums.length;
+    const sharedAlbums = albums.filter((a) => a.shareEnabled).length;
+    const totalCouplesGivenAccess = albums.reduce(
+      (sum, a) => sum + (a.coupleAccess ? a.coupleAccess.length : 0),
+      0
+    );
+
+    res.json({
+      success: true,
+      photographer,
+      albums,
+      stats: {
+        totalAlbums,
+        sharedAlbums,
+        totalCouplesGivenAccess,
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching photographer detail:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /admin/photographers/:id/status
+// Approve, suspend or set back to pending
 router.patch("/photographers/:id/status", async (req, res) => {
   const db = getDb();
   try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid photographer ID" });
+    }
+
     const { status } = req.body;
     if (!["active", "suspended", "pending"].includes(status)) {
       return res
         .status(400)
         .json({ error: "status must be active, suspended or pending" });
     }
-    await db
-      .collection("photographers")
-      .updateOne(
-        { _id: new ObjectId(req.params.id) },
-        { $set: { status, updatedAt: new Date() } },
-      );
-    res.json({ message: `Photographer status set to ${status}` });
+
+    const result = await db.collection("photographers").updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "Photographer not found" });
+    }
+
+    res.json({
+      success: true,
+      message: `Photographer status set to ${status}`,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// PUT /admin/photographers/:id
+// Edit photographer details — name, phone, bio
+router.put("/photographers/:id", async (req, res) => {
+  const db = getDb();
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid photographer ID" });
+    }
+
+    const { name, phone, bio, email } = req.body;
+    const updateData = { updatedAt: new Date() };
+    if (name) updateData.name = name;
+    if (phone) updateData.phone = phone;
+    if (bio) updateData.bio = bio;
+
+    // If email is being changed check it is not already taken
+    if (email) {
+      const existing = await db
+        .collection("photographers")
+        .findOne({ email, _id: { $ne: new ObjectId(req.params.id) } });
+      if (existing) {
+        return res.status(400).json({ error: "Email already in use" });
+      }
+      updateData.email = email;
+    }
+
+    const result = await db.collection("photographers").updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: updateData }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "Photographer not found" });
+    }
+
+    res.json({ success: true, message: "Photographer updated successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /admin/photographers/:id/reset-password
+// Admin resets a photographer's password
+router.post("/photographers/:id/reset-password", async (req, res) => {
+  const db = getDb();
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid photographer ID" });
+    }
+
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "newPassword must be at least 6 characters" });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    const result = await db.collection("photographers").updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { password: hashed, updatedAt: new Date() } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "Photographer not found" });
+    }
+
+    res.json({ success: true, message: "Password reset successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /admin/photographers/:id
+// Delete photographer and all their albums
 router.delete("/photographers/:id", async (req, res) => {
   const db = getDb();
   try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid photographer ID" });
+    }
+
+    const photographer = await db
+      .collection("photographers")
+      .findOne({ _id: new ObjectId(req.params.id) });
+
+    if (!photographer) {
+      return res.status(404).json({ error: "Photographer not found" });
+    }
+
+    // Delete all albums belonging to this photographer
+    const albumsResult = await db
+      .collection("albums")
+      .deleteMany({ photographer_id: new ObjectId(req.params.id) });
+
+    // Delete the photographer
     await db
       .collection("photographers")
       .deleteOne({ _id: new ObjectId(req.params.id) });
-    res.json({ message: "Photographer deleted" });
+
+    res.json({
+      success: true,
+      message: "Photographer and their albums deleted",
+      albumsDeleted: albumsResult.deletedCount,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// ════════════════════════════════════════════════════════════════
+// USER MANAGEMENT
+// ════════════════════════════════════════════════════════════════
+
+// GET /admin/users
+// List all users with search and pagination
 router.get("/users", async (req, res) => {
   const db = getDb();
   try {
+    const { search } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const total = await db.collection("users").countDocuments(filter);
+
     const users = await db
       .collection("users")
-      .find({}, { projection: { password: 0, tempPassword: 0 } })
+      .find(filter, { projection: { password: 0, tempPassword: 0 } })
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .toArray();
-    res.json({ users });
+
+    res.json({
+      success: true,
+      users,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /admin/users/:id
+// Get one user with all albums they have access to
+router.get("/users/:id", async (req, res) => {
+  const db = getDb();
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid user ID" });
+    }
+
+    const user = await db
+      .collection("users")
+      .findOne(
+        { _id: new ObjectId(req.params.id) },
+        { projection: { password: 0, tempPassword: 0 } }
+      );
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Find albums this user has access to
+    const albums = await db
+      .collection("albums")
+      .find(
+        { "coupleAccess.email": user.email },
+        {
+          projection: {
+            title: 1,
+            shareEnabled: 1,
+            shareToken: 1,
+            created_at: 1,
+            photographer_id: 1,
+          },
+        }
+      )
+      .toArray();
+
+    res.json({
+      success: true,
+      user,
+      albums,
+      totalAlbumsAccess: albums.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /admin/users/:id
+// Delete a user account
+router.delete("/users/:id", async (req, res) => {
+  const db = getDb();
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid user ID" });
+    }
+
+    const user = await db
+      .collection("users")
+      .findOne({ _id: new ObjectId(req.params.id) });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Remove this user from coupleAccess in all albums
+    await db.collection("albums").updateMany(
+      { "coupleAccess.email": user.email },
+      { $pull: { coupleAccess: { email: user.email } } }
+    );
+
+    await db
+      .collection("users")
+      .deleteOne({ _id: new ObjectId(req.params.id) });
+
+    res.json({ success: true, message: "User deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+// ALBUM MANAGEMENT (admin view)
+// ════════════════════════════════════════════════════════════════
+
+// GET /admin/albums
+// List all albums across all photographers with search and pagination
+router.get("/albums", async (req, res) => {
+  const db = getDb();
+  try {
+    const { search, photographerId } = req.query;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const filter = {};
+    if (photographerId && ObjectId.isValid(photographerId)) {
+      filter.photographer_id = new ObjectId(photographerId);
+    }
+    if (search) {
+      filter.title = { $regex: search, $options: "i" };
+    }
+
+    const total = await db.collection("albums").countDocuments(filter);
+
+    const albums = await db
+      .collection("albums")
+      .aggregate([
+        { $match: filter },
+        { $sort: { created_at: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: "photographers",
+            localField: "photographer_id",
+            foreignField: "_id",
+            as: "photographer",
+          },
+        },
+        {
+          $unwind: {
+            path: "$photographer",
+            preserveNullAndEmptyArrays: true,
+          },
+        },
+        {
+          $project: {
+            title: 1,
+            description: 1,
+            shareEnabled: 1,
+            shareToken: 1,
+            created_at: 1,
+            coupleAccessCount: { $size: { $ifNull: ["$coupleAccess", []] } },
+            "photographer._id": 1,
+            "photographer.name": 1,
+            "photographer.email": 1,
+          },
+        },
+      ])
+      .toArray();
+
+    res.json({
+      success: true,
+      albums,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /admin/albums/:id
+// Admin force delete any album
+router.delete("/albums/:id", async (req, res) => {
+  const db = getDb();
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid album ID" });
+    }
+
+    const result = await db
+      .collection("albums")
+      .deleteOne({ _id: new ObjectId(req.params.id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Album not found" });
+    }
+
+    res.json({ success: true, message: "Album deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /admin/albums/:id/disable-sharing
+// Admin force disable sharing on any album
+router.patch("/albums/:id/disable-sharing", async (req, res) => {
+  const db = getDb();
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid album ID" });
+    }
+
+    await db
+      .collection("albums")
+      .updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: { shareEnabled: false, updated_at: new Date() } }
+      );
+
+    res.json({ success: true, message: "Sharing disabled for this album" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+// DASHBOARD STATS (updated to include new collections)
+// ════════════════════════════════════════════════════════════════
+
+// GET /admin/dashboard-stats
+// Full dashboard numbers for the admin panel home screen
+router.get("/dashboard-stats", async (req, res) => {
+  const db = getDb();
+  try {
+    const [
+      totalPhotographers,
+      pendingPhotographers,
+      activePhotographers,
+      suspendedPhotographers,
+      totalAlbums,
+      sharedAlbums,
+      totalUsers,
+      totalServices,
+      totalProducts,
+      totalProposals,
+      totalVendors,
+      pendingVendors,
+    ] = await Promise.all([
+      db.collection("photographers").countDocuments(),
+      db.collection("photographers").countDocuments({ status: "pending" }),
+      db.collection("photographers").countDocuments({ status: "active" }),
+      db.collection("photographers").countDocuments({ status: "suspended" }),
+      db.collection("albums").countDocuments(),
+      db.collection("albums").countDocuments({ shareEnabled: true }),
+      db.collection("users").countDocuments(),
+      db.collection("services").countDocuments(),
+      db.collection("vendor_products").countDocuments(),
+      db.collection("vendor_proposal").countDocuments(),
+      db.collection("vendor_profiles").countDocuments(),
+      db
+        .collection("vendor_profiles")
+        .countDocuments({ approval_status: "pending" }),
+    ]);
+
+    res.json({
+      success: true,
+      stats: {
+        photographers: {
+          total: totalPhotographers,
+          pending: pendingPhotographers,
+          active: activePhotographers,
+          suspended: suspendedPhotographers,
+        },
+        albums: {
+          total: totalAlbums,
+          shared: sharedAlbums,
+        },
+        users: {
+          total: totalUsers,
+        },
+        legacy: {
+          services: totalServices,
+          products: totalProducts,
+          proposals: totalProposals,
+          vendors: totalVendors,
+          pendingVendors: pendingVendors,
+        },
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get single admin by id — MUST stay last to avoid catching other routes
+router.get("/:id", async (req, res) => {
+  const db = getDb();
+  const admin = await db
+    .collection("admin")
+    .findOne({ _id: new ObjectId(req.params.id) });
+  if (!admin) return res.status(404).json({ error: "Admin not found" });
+  res.json({ admin });
 });
 
 module.exports = router;
