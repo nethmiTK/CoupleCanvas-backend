@@ -8,6 +8,7 @@ const path = require('path');
 
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
+const { errorMiddleware, notFoundMiddleware } = require('./middleware/errorMiddleware');
 
 const app = express();
 

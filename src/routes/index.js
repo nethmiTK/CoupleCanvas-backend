@@ -21,6 +21,7 @@ const albumVendorsRoutes = require('./album_vendors');
 const vendorAlbumRoutes = require('./VendorAlbumRoutes/vendoralbum');
 const marriageProposalRoutes = require('./marriage_proposal');
 const statsRoutes = require('./stats');
+const subscriptionPaymentRoutes = require('./subscription_payment');
 
 // Health check
 router.get('/', (req, res) => res.json({
@@ -72,5 +73,6 @@ router.use('/marriage-proposals', marriageProposalRoutes);
 
 // Stats Routes
 router.use('/stats', statsRoutes);
+router.use('/subscription', subscriptionPaymentRoutes);
 
 module.exports = router;
