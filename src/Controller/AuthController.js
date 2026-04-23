@@ -3,6 +3,38 @@ const Proposal = require('../models/Proposal');
 const { generateToken } = require('../utils/generateToken');
 const { resolveSubscriptionAccessState } = require('./subscriptionController');
 
+function normalizeVendorTypes(vendorTypes = []) {
+  return Array.isArray(vendorTypes)
+    ? vendorTypes.map((type) => (type === 'photographer' ? 'album' : type))
+    : [];
+}
+
+function buildVendorAccounts({ photographer, proposalDoc, normalizedVendorTypes }) {
+  const accounts = [];
+
+  if (photographer && normalizedVendorTypes.some((type) => type === 'album' || type === 'photographer')) {
+    accounts.push({
+      vendorType: 'album',
+      vendorId: photographer._id.toString(),
+      collection: 'photographers',
+      status: photographer.status,
+      paymentStatus: photographer.paymentStatus || null,
+    });
+  }
+
+  if (proposalDoc && normalizedVendorTypes.includes('proposal')) {
+    accounts.push({
+      vendorType: 'proposal',
+      vendorId: proposalDoc._id.toString(),
+      collection: 'proposals',
+      status: proposalDoc.status,
+      paymentStatus: proposalDoc.paymentStatus || null,
+    });
+  }
+
+  return accounts;
+}
+
 /**
  * Register new vendor
  * Handles registration for photographers (album) and proposal vendors
@@ -34,9 +66,7 @@ const register = async (req, res, next) => {
       proposal,
     } = req.body;
 
-    const normalizedVendorTypes = Array.isArray(vendorTypes)
-      ? vendorTypes.map((type) => (type === 'photographer' ? 'album' : type))
-      : [];
+    const normalizedVendorTypes = normalizeVendorTypes(vendorTypes);
 
     // ==================== VALIDATION ====================
     if (!email || !username || !password || !address || !birthdate || !sex) {
@@ -141,6 +171,10 @@ const register = async (req, res, next) => {
     // ==================== GENERATE TOKEN ====================
     const vendorId = photographer ? photographer._id : proposalDoc._id;
     const token = generateToken(vendorId.toString(), 'vendor');
+    const vendorAccounts = buildVendorAccounts({ photographer, proposalDoc, normalizedVendorTypes });
+    const access = photographer
+      ? resolveSubscriptionAccessState(photographer, 'album')
+      : resolveSubscriptionAccessState(proposalDoc, 'proposal');
 
     // ==================== RESPONSE ====================
     res.status(201).json({
@@ -149,7 +183,9 @@ const register = async (req, res, next) => {
       email: email.toLowerCase(),
       username,
       vendorTypes,
+      vendorAccounts,
       status: 'pending',
+      nextRoute: access.nextRoute,
       token,
       message: 'Registration successful. Please wait for approval.',
     });
@@ -188,8 +224,31 @@ const login = async (req, res, next) => {
         });
       }
 
+      const proposalDoc = photographer.vendorTypes?.includes('proposal')
+        ? await Proposal.findOne({ email: photographer.email.toLowerCase() })
+        : null;
+      const vendorAccounts = buildVendorAccounts({
+        photographer,
+        proposalDoc,
+        normalizedVendorTypes: normalizeVendorTypes(photographer.vendorTypes),
+      });
       const token = generateToken(photographer._id.toString(), 'vendor');
-      const access = resolveSubscriptionAccessState(photographer);
+      
+      // Separate access states for each account
+      const accountsWithAccess = vendorAccounts.map(acc => {
+        const accAccess = resolveSubscriptionAccessState(
+          acc.vendorType === 'proposal' && proposalDoc ? proposalDoc : photographer,
+          acc.vendorType
+        );
+        return {
+          ...acc,
+          accessState: accAccess.state,
+          nextRoute: accAccess.nextRoute
+        };
+      });
+
+      // Default access for the overall login response (prioritize active/pending over no_plan)
+      const primaryAccount = accountsWithAccess.find(a => a.accessState === 'active') || accountsWithAccess[0];
 
       // Update last login
       photographer.lastLogin = new Date();
@@ -207,8 +266,9 @@ const login = async (req, res, next) => {
         paymentStatus: photographer.paymentStatus || null,
         subscriptionStartDate: photographer.subscriptionStartDate || null,
         subscriptionEndDate: photographer.subscriptionEndDate || null,
-        accessState: access.state,
-        nextRoute: access.nextRoute,
+        vendorAccounts: accountsWithAccess,
+        accessState: primaryAccount.accessState,
+        nextRoute: primaryAccount.nextRoute,
         token,
       });
     }
@@ -256,8 +316,54 @@ const getProfile = async (req, res, next) => {
   }
 };
 
+/**
+ * Update vendor profile
+ * 
+ * @route PUT /api/auth/profile/update
+ * @header Authorization: Bearer <token>
+ */
+const updateProfile = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authenticated',
+      });
+    }
+
+    const { username, businessName, whatsappNo, contactNo, address, bio } = req.body;
+
+    const photographer = await Photographer.findById(req.user.id);
+    if (!photographer) {
+      return res.status(404).json({
+        success: false,
+        error: 'Photographer not found',
+      });
+    }
+
+    // Update fields
+    if (username) photographer.username = username;
+    if (businessName !== undefined) photographer.businessName = businessName;
+    if (whatsappNo !== undefined) photographer.whatsappNo = whatsappNo;
+    if (contactNo !== undefined) photographer.contactNo = contactNo;
+    if (address !== undefined) photographer.address = address;
+    if (bio !== undefined) photographer.bio = bio;
+
+    await photographer.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: photographer,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   register,
   login,
   getProfile,
+  updateProfile,
 };

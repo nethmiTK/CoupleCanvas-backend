@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const Photographer = require('../models/Photographer');
+const Proposal = require('../models/Proposal');
 const { getDb } = require('../db/mongo');
 
 function getVendorIdFromRequest(req) {
@@ -18,35 +19,75 @@ function calculateSubscriptionEndDate(startDate, durationDays) {
 
 function normalizeVendorType(vendorType) {
   if (vendorType === 'photographer') return 'album';
-  return vendorType;
+  return vendorType || 'album';
 }
 
-function resolveSubscriptionAccessState(photographer) {
-  if (!photographer?.subPlan) {
+function getVendorModel(vendorType) {
+  return normalizeVendorType(vendorType) === 'proposal' ? Proposal : Photographer;
+}
+
+function getAdminRoute(vendorType) {
+  return normalizeVendorType(vendorType) === 'proposal'
+    ? '/v_proposals_admin'
+    : '/photographer-admin/gallery';
+}
+
+function getVendorSubscription(vendor, vendorType) {
+  // Use direct fields instead of vendorSubscriptions array
+  return {
+    subPlan: vendor.subPlan,
+    paymentMethod: vendor.paymentMethod,
+    paymentSlip: vendor.paymentSlip,
+    paymentStatus: vendor.paymentStatus,
+    paymentAmount: vendor.paymentAmount,
+    paymentId: vendor.paymentId,
+    transactionId: vendor.transactionId,
+    paidAt: vendor.paidAt,
+    subscriptionStartDate: vendor.subscriptionStartDate,
+    subscriptionEndDate: vendor.subscriptionEndDate,
+  };
+}
+
+function upsertVendorSubscription(vendor, vendorType, subscriptionData) {
+  // Update direct fields on the vendor document
+  Object.assign(vendor, subscriptionData);
+  return subscriptionData;
+}
+
+function resolveSubscriptionAccessState(vendor, vendorType) {
+  const subscription = getVendorSubscription(vendor, vendorType);
+  if (!subscription?.subPlan) {
     return {
       state: 'no_plan',
       nextRoute: '/subscription-plans',
     };
   }
 
-  const status = photographer.paymentStatus;
+  const status = subscription.paymentStatus;
   if (status === 'active') {
     return {
       state: 'active',
-      nextRoute: '/photographer-admin/gallery',
+      nextRoute: getAdminRoute(vendorType),
     };
   }
 
   const now = Date.now();
-  const hasStart = !!photographer.subscriptionStartDate;
-  const hasEnd = !!photographer.subscriptionEndDate;
-  const endMs = hasEnd ? new Date(photographer.subscriptionEndDate).getTime() : null;
+  const hasStart = !!subscription.subscriptionStartDate;
+  const hasEnd = !!subscription.subscriptionEndDate;
+  const endMs = hasEnd ? new Date(subscription.subscriptionEndDate).getTime() : null;
   const isExpired = endMs ? endMs < now : false;
 
-  if ((status === 'active' || status === 'paid') && hasStart && !isExpired) {
+  if (isExpired) {
+    return {
+      state: 'expired',
+      nextRoute: '/subscription-plans',
+    };
+  }
+
+  if ((status === 'active' || status === 'paid') && hasStart) {
     return {
       state: 'active',
-      nextRoute: '/photographer-admin/gallery',
+      nextRoute: getAdminRoute(vendorType),
     };
   }
 
@@ -71,6 +112,21 @@ async function getSubPlanById(planId) {
   return db.collection('sub_plan').findOne({ _id: new ObjectId(planId) });
 }
 
+async function findVendorRecord(vendorId, vendorType) {
+  const VendorModel = getVendorModel(vendorType);
+  const directRecord = await VendorModel.findById(vendorId);
+  if (directRecord || normalizeVendorType(vendorType) !== 'proposal') {
+    return directRecord;
+  }
+
+  const photographer = await Photographer.findById(vendorId);
+  if (!photographer?.email) {
+    return null;
+  }
+
+  return Proposal.findOne({ email: photographer.email.toLowerCase() });
+}
+
 const uploadPaymentSlip = async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No payment slip uploaded' });
@@ -91,6 +147,7 @@ const subscribeWithSlip = async (req, res, next) => {
 
     const { vendorType, planId, planName, planDuration, amount, paymentSlip, paymentMethod, status } = req.body;
     const normalizedVendorType = normalizeVendorType(vendorType);
+    const VendorModel = getVendorModel(normalizedVendorType);
 
     if (!normalizedVendorType || !planName) {
       return res.status(400).json({ success: false, error: 'vendorType and planName are required' });
@@ -100,38 +157,52 @@ const subscribeWithSlip = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Payment slip is required for paid plans' });
     }
 
-    const photographer = await Photographer.findById(vendorId);
-    if (!photographer) {
+    const vendor = await findVendorRecord(vendorId, normalizedVendorType);
+    if (!vendor) {
       return res.status(404).json({ success: false, error: 'Vendor not found' });
     }
 
     const now = new Date();
     const startDate = status === 'active' || Number(amount || 0) === 0 ? now : null;
     const endDate = startDate ? calculateSubscriptionEndDate(startDate, planDuration || 30) : null;
+    const paymentStatus = Number(amount || 0) === 0 ? 'active' : 'pending';
 
-    photographer.vendorTypes = Array.from(new Set([...(photographer.vendorTypes || []), normalizedVendorType]));
-    photographer.subPlan = planName;
-    photographer.paymentMethod = paymentMethod === 'payhere' ? 'payhere' : 'payment-slip';
-    photographer.paymentSlip = paymentSlip || null;
-    photographer.paymentStatus = Number(amount || 0) === 0 ? 'active' : 'pending';
-    photographer.paymentAmount = Number(amount || 0);
-    photographer.paymentId = `SLIP-${Date.now()}`;
-    photographer.transactionId = null;
-    photographer.paidAt = Number(amount || 0) === 0 ? now : null;
-    photographer.subscriptionStartDate = startDate;
-    photographer.subscriptionEndDate = endDate;
+    vendor.vendorTypes = Array.from(new Set([...(vendor.vendorTypes || []), normalizedVendorType]));
+    upsertVendorSubscription(vendor, normalizedVendorType, {
+      subPlan: planName,
+      paymentMethod: paymentMethod === 'payhere' ? 'payhere' : 'payment-slip',
+      paymentSlip: paymentSlip || null,
+      paymentStatus,
+      paymentAmount: Number(amount || 0),
+      paymentId: `SLIP-${Date.now()}`,
+      transactionId: null,
+      paidAt: Number(amount || 0) === 0 ? now : null,
+      subscriptionStartDate: startDate,
+      subscriptionEndDate: endDate,
+    });
+
+    vendor.subPlan = planName;
+    vendor.paymentMethod = paymentMethod === 'payhere' ? 'payhere' : 'payment-slip';
+    vendor.paymentSlip = paymentSlip || null;
+    vendor.paymentStatus = paymentStatus;
+    vendor.paymentAmount = Number(amount || 0);
+    vendor.paymentId = `SLIP-${Date.now()}`;
+    vendor.transactionId = null;
+    vendor.paidAt = Number(amount || 0) === 0 ? now : null;
+    vendor.subscriptionStartDate = startDate;
+    vendor.subscriptionEndDate = endDate;
 
     // Keep legacy account status workflow while subscription state uses paymentStatus.
-    photographer.status = Number(amount || 0) === 0 ? 'approved' : 'pending';
+    vendor.status = Number(amount || 0) === 0 ? 'approved' : 'pending';
 
-    await photographer.save();
+    await vendor.save();
 
     return res.status(201).json({
       success: true,
-      vendorId: photographer._id.toString(),
+      vendorId: vendor._id.toString(),
       vendorType: normalizedVendorType,
-      subPlan: photographer.subPlan,
-      paymentStatus: photographer.paymentStatus,
+      subPlan: vendor.subPlan,
+      paymentStatus: vendor.paymentStatus,
       status: Number(amount || 0) === 0 ? 'active' : 'pending',
       message: Number(amount || 0) === 0
         ? 'Free plan activated successfully'
@@ -145,45 +216,47 @@ const subscribeWithSlip = async (req, res, next) => {
 const getMySubscription = async (req, res, next) => {
   try {
     const { vendorId } = req.params;
+    const normalizedVendorType = normalizeVendorType(req.query.vendorType);
     if (!req.user?.id || String(vendorId) !== String(req.user.id)) {
       return res.status(403).json({ success: false, error: 'Unauthorized vendor access' });
     }
 
-    const photographer = await Photographer.findById(vendorId);
-    if (!photographer) {
+    const vendor = await findVendorRecord(vendorId, normalizedVendorType);
+    if (!vendor) {
       return res.status(404).json({ success: false, error: 'Vendor not found' });
     }
 
-    const planDuration = photographer.subscriptionStartDate && photographer.subscriptionEndDate
+    const subscription = getVendorSubscription(vendor, normalizedVendorType);
+    const planDuration = subscription?.subscriptionStartDate && subscription?.subscriptionEndDate
       ? Math.max(
           1,
           Math.ceil(
-            (new Date(photographer.subscriptionEndDate).getTime() -
-              new Date(photographer.subscriptionStartDate).getTime()) /
+            (new Date(subscription.subscriptionEndDate).getTime() -
+              new Date(subscription.subscriptionStartDate).getTime()) /
               (1000 * 60 * 60 * 24)
           )
         )
       : undefined;
 
-    const accessState = resolveSubscriptionAccessState(photographer);
+    const accessState = resolveSubscriptionAccessState(vendor, normalizedVendorType);
 
-    const targetVendorTypes = (photographer.vendorTypes || []).filter((type) => ['album', 'photographer', 'proposal'].includes(type));
-
-    const subscriptions = targetVendorTypes.map((type) => ({
-      _id: `${photographer._id.toString()}-${type}`,
-      vendorType: type,
-      planName: photographer.subPlan || '',
-      planDuration,
-      status: accessState.state,
-      amount: photographer.paymentAmount || 0,
-      createdAt: photographer.updatedAt || photographer.createdAt,
-      paymentMethod: photographer.paymentMethod,
-      paymentSlip: photographer.paymentSlip,
-    }));
+    const subscriptions = subscription?.subPlan
+      ? [{
+          _id: `${vendor._id.toString()}-${normalizedVendorType}`,
+          vendorType: normalizedVendorType,
+          planName: subscription.subPlan || '',
+          planDuration,
+          status: accessState.state,
+          amount: subscription.paymentAmount || 0,
+          createdAt: vendor.updatedAt || vendor.createdAt,
+          paymentMethod: subscription.paymentMethod,
+          paymentSlip: subscription.paymentSlip,
+        }]
+      : [];
 
     return res.status(200).json({
       success: true,
-      subscriptions: photographer.subPlan ? subscriptions : [],
+      subscriptions,
     });
   } catch (error) {
     next(error);
@@ -199,17 +272,18 @@ const createPayHereCheckout = async (req, res, next) => {
 
     const { vendorType, planId, planName, amount, currency = 'LKR' } = req.body;
     const normalizedVendorType = normalizeVendorType(vendorType);
+    const VendorModel = getVendorModel(normalizedVendorType);
 
     if (!planName || !amount) {
       return res.status(400).json({ success: false, error: 'planName and amount are required' });
     }
 
-    const photographer = await Photographer.findById(vendorId);
-    if (!photographer) {
+    const vendor = await findVendorRecord(vendorId, normalizedVendorType);
+    if (!vendor) {
       return res.status(404).json({ success: false, error: 'Vendor not found' });
     }
 
-    const orderId = `PH-${Date.now()}-${photographer._id.toString().slice(-6)}`;
+    const orderId = `${normalizedVendorType.toUpperCase()}-PH-${Date.now()}-${vendor._id.toString().slice(-6)}`;
     const merchantId = process.env.PAYHERE_MERCHANT_ID || '';
     const merchantSecret = process.env.PAYHERE_MERCHANT_SECRET || '';
 
@@ -224,19 +298,32 @@ const createPayHereCheckout = async (req, res, next) => {
         .toUpperCase();
     }
 
-    photographer.vendorTypes = Array.from(new Set([...(photographer.vendorTypes || []), normalizedVendorType]));
-    photographer.subPlan = planName;
-    photographer.paymentMethod = 'payhere';
-    photographer.paymentAmount = Number(amount || 0);
-    photographer.paymentStatus = 'pending';
-    photographer.paymentId = orderId;
-    photographer.transactionId = null;
-    photographer.paymentSlip = null;
-    photographer.subscriptionStartDate = null;
-    photographer.subscriptionEndDate = null;
-    photographer.paidAt = null;
-    photographer.status = 'pending';
-    await photographer.save();
+    vendor.vendorTypes = Array.from(new Set([...(vendor.vendorTypes || []), normalizedVendorType]));
+    upsertVendorSubscription(vendor, normalizedVendorType, {
+      subPlan: planName,
+      paymentMethod: 'payhere',
+      paymentAmount: Number(amount || 0),
+      paymentStatus: 'pending',
+      paymentId: orderId,
+      transactionId: null,
+      paymentSlip: null,
+      subscriptionStartDate: null,
+      subscriptionEndDate: null,
+      paidAt: null,
+    });
+
+    vendor.subPlan = planName;
+    vendor.paymentMethod = 'payhere';
+    vendor.paymentAmount = Number(amount || 0);
+    vendor.paymentStatus = 'pending';
+    vendor.paymentId = orderId;
+    vendor.transactionId = null;
+    vendor.paymentSlip = null;
+    vendor.subscriptionStartDate = null;
+    vendor.subscriptionEndDate = null;
+    vendor.paidAt = null;
+    vendor.status = 'pending';
+    await vendor.save();
 
     const plan = await getSubPlanById(planId);
 
@@ -271,8 +358,10 @@ const payHereCallback = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'order_id is required' });
     }
 
-    const photographer = await Photographer.findOne({ paymentId: order_id });
-    if (!photographer) {
+    const orderVendorType = String(order_id).split('-PH-')[0]?.toLowerCase();
+    const VendorModel = getVendorModel(orderVendorType);
+    const vendor = await VendorModel.findOne({ paymentId: order_id });
+    if (!vendor) {
       return res.status(404).json({ success: false, error: 'Order not found' });
     }
 
@@ -294,19 +383,21 @@ const payHereCallback = async (req, res, next) => {
 
     if (String(status_code) === '2') {
       const now = new Date();
-      const duration = (() => {
-        const planName = photographer.subPlan || '';
-        if (!planName) return 30;
-        return 30;
-      })();
-
-      photographer.paymentStatus = 'active';
-      photographer.transactionId = payment_id || photographer.transactionId;
-      photographer.paidAt = now;
-      photographer.subscriptionStartDate = now;
-      photographer.subscriptionEndDate = calculateSubscriptionEndDate(now, duration);
-      photographer.status = 'approved';
-      await photographer.save();
+      upsertVendorSubscription(vendor, orderVendorType, {
+        ...getVendorSubscription(vendor, orderVendorType),
+        paymentStatus: 'active',
+        transactionId: payment_id || null,
+        paidAt: now,
+        subscriptionStartDate: now,
+        subscriptionEndDate: calculateSubscriptionEndDate(now, 30),
+      });
+      vendor.paymentStatus = 'active';
+      vendor.transactionId = payment_id || vendor.transactionId;
+      vendor.paidAt = now;
+      vendor.subscriptionStartDate = now;
+      vendor.subscriptionEndDate = calculateSubscriptionEndDate(now, 30);
+      vendor.status = 'approved';
+      await vendor.save();
     }
 
     return res.status(200).json({ success: true });
@@ -319,42 +410,56 @@ const adminUpdateSubscriptionStatus = async (req, res, next) => {
   try {
     const { vendorId } = req.params;
     const { paymentStatus, activate } = req.body;
+    const normalizedVendorType = normalizeVendorType(req.body.vendorType);
+    const VendorModel = getVendorModel(normalizedVendorType);
 
-    const photographer = await Photographer.findById(vendorId);
-    if (!photographer) {
+    const vendor = await findVendorRecord(vendorId, normalizedVendorType);
+    if (!vendor) {
       return res.status(404).json({ success: false, error: 'Vendor not found' });
     }
 
     if (paymentStatus) {
-      photographer.paymentStatus = paymentStatus;
+      upsertVendorSubscription(vendor, normalizedVendorType, {
+        ...getVendorSubscription(vendor, normalizedVendorType),
+        paymentStatus,
+      });
+      vendor.paymentStatus = paymentStatus;
     }
 
     if (activate === true) {
       const now = new Date();
-      photographer.paymentStatus = 'active';
-      photographer.paidAt = now;
-      photographer.subscriptionStartDate = now;
-      const duration = photographer.subscriptionStartDate && photographer.subscriptionEndDate
+      const currentSubscription = getVendorSubscription(vendor, normalizedVendorType);
+      const duration = currentSubscription?.subscriptionStartDate && currentSubscription?.subscriptionEndDate
         ? Math.max(
             1,
             Math.ceil(
-              (new Date(photographer.subscriptionEndDate).getTime() -
-                new Date(photographer.subscriptionStartDate).getTime()) /
+              (new Date(currentSubscription.subscriptionEndDate).getTime() -
+                new Date(currentSubscription.subscriptionStartDate).getTime()) /
                 (1000 * 60 * 60 * 24)
             )
           )
         : 30;
-      photographer.subscriptionEndDate = calculateSubscriptionEndDate(now, duration);
-      photographer.status = 'approved';
+      upsertVendorSubscription(vendor, normalizedVendorType, {
+        ...currentSubscription,
+        paymentStatus: 'active',
+        paidAt: now,
+        subscriptionStartDate: now,
+        subscriptionEndDate: calculateSubscriptionEndDate(now, duration),
+      });
+      vendor.paymentStatus = 'active';
+      vendor.paidAt = now;
+      vendor.subscriptionStartDate = now;
+      vendor.subscriptionEndDate = calculateSubscriptionEndDate(now, duration);
+      vendor.status = 'approved';
     }
 
-    await photographer.save();
+    await vendor.save();
 
     return res.status(200).json({
       success: true,
-      vendorId: photographer._id.toString(),
-      paymentStatus: photographer.paymentStatus,
-      status: photographer.status,
+      vendorId: vendor._id.toString(),
+      paymentStatus: vendor.paymentStatus,
+      status: vendor.status,
     });
   } catch (error) {
     next(error);
@@ -364,27 +469,29 @@ const adminUpdateSubscriptionStatus = async (req, res, next) => {
 const getSubscriptionAccessState = async (req, res, next) => {
   try {
     const { vendorId } = req.params;
+    const normalizedVendorType = normalizeVendorType(req.query.vendorType);
 
     if (!req.user?.id || String(vendorId) !== String(req.user.id)) {
       return res.status(403).json({ success: false, error: 'Unauthorized vendor access' });
     }
 
-    const photographer = await Photographer.findById(vendorId);
-    if (!photographer) {
+    const vendor = await findVendorRecord(vendorId, normalizedVendorType);
+    if (!vendor) {
       return res.status(404).json({ success: false, error: 'Vendor not found' });
     }
 
-    const access = resolveSubscriptionAccessState(photographer);
+    const subscription = getVendorSubscription(vendor, normalizedVendorType);
+    const access = resolveSubscriptionAccessState(vendor, normalizedVendorType);
 
     return res.status(200).json({
       success: true,
-      vendorId: photographer._id.toString(),
-      subPlan: photographer.subPlan || null,
-      paymentStatus: photographer.paymentStatus || null,
+      vendorId: vendor._id.toString(),
+      subPlan: subscription?.subPlan || null,
+      paymentStatus: subscription?.paymentStatus || null,
       accessState: access.state,
       nextRoute: access.nextRoute,
-      subscriptionStartDate: photographer.subscriptionStartDate,
-      subscriptionEndDate: photographer.subscriptionEndDate,
+      subscriptionStartDate: subscription?.subscriptionStartDate || null,
+      subscriptionEndDate: subscription?.subscriptionEndDate || null,
     });
   } catch (error) {
     next(error);

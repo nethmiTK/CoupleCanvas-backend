@@ -1,5 +1,5 @@
 const express = require('express');
-const { register, login, getProfile } = require('../Controller/AuthController');
+const { register, login, getProfile, updateProfile } = require('../Controller/AuthController');
 const { authenticate } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -24,5 +24,12 @@ router.post('/login', login);
  * @access  Private
  */
 router.get('/me', authenticate, getProfile);
+
+/**
+ * @route   PUT /api/auth/profile/update
+ * @desc    Update vendor profile
+ * @access  Private
+ */
+router.put('/profile/update', authenticate, updateProfile);
 
 module.exports = router;

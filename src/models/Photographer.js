@@ -45,6 +45,10 @@ const photographerSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    contactNo: {
+      type: String,
+      trim: true,
+    },
     vendorTypes: {
       type: [String],
       enum: ['album', 'photographer', 'proposal', 'services', 'product'],
@@ -56,7 +60,7 @@ const photographerSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['payment-slip', 'payhere'],
+      enum: ['payment-slip', 'payhere', null],
       default: null,
     },
     paymentSlip: {
@@ -65,7 +69,7 @@ const photographerSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ['pending', 'paid', 'active', 'rejected'],
+      enum: ['pending', 'paid', 'active', 'rejected', null],
       default: null,
     },
     paymentAmount: {
@@ -92,6 +96,11 @@ const photographerSchema = new mongoose.Schema(
     subscriptionEndDate: {
       type: Date,
       default: null,
+    },
+    bio: {
+      type: String,
+      default: '',
+      trim: true
     },
     status: {
       type: String,

@@ -37,6 +37,13 @@ router.get('/', async (req, res) => {
   res.json({ plans });
 });
 
+// Get plans by vendor type
+router.get('/type/:vendorType', async (req, res) => {
+  const db = getDb();
+  const plans = await db.collection('sub_plan').find({ vendorType: req.params.vendorType }).toArray();
+  res.json({ plans });
+});
+
 // Get single sub_plan by id
 router.get('/:id', async (req, res) => {
   const db = getDb();
@@ -47,13 +54,6 @@ router.get('/:id', async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: 'Invalid ID format' });
   }
-});
-
-// Get plans by vendor type
-router.get('/type/:vendorType', async (req, res) => {
-  const db = getDb();
-  const plans = await db.collection('sub_plan').find({ vendorType: req.params.vendorType }).toArray();
-  res.json({ plans });
 });
 
 // Update sub_plan
