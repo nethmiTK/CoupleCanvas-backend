@@ -1,35 +1,30 @@
 const express = require('express');
 const { register, login, getProfile, updateProfile } = require('../Controller/AuthController');
 const { authenticate } = require('../middleware/authMiddleware');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const router = express.Router();
 
-/**
- * @route   POST /api/auth/register
- * @desc    Register new vendor (photographer/proposal)
- * @access  Public
- */
+const profileUploadsDir = path.join(__dirname, '../../public/uploads/profiles');
+if (!fs.existsSync(profileUploadsDir)) {
+	fs.mkdirSync(profileUploadsDir, { recursive: true });
+}
+
+const profileStorage = multer.diskStorage({
+	destination: (req, file, cb) => cb(null, profileUploadsDir),
+	filename: (req, file, cb) => {
+		const ext = path.extname(file.originalname);
+		cb(null, `photographer-${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+	},
+});
+
+const uploadProfileImage = multer({ storage: profileStorage });
+
 router.post('/register', register);
-
-/**
- * @route   POST /api/auth/login
- * @desc    Login vendor
- * @access  Public
- */
 router.post('/login', login);
-
-/**
- * @route   GET /api/auth/me
- * @desc    Get current vendor profile
- * @access  Private
- */
 router.get('/me', authenticate, getProfile);
-
-/**
- * @route   PUT /api/auth/profile/update
- * @desc    Update vendor profile
- * @access  Private
- */
-router.put('/profile/update', authenticate, updateProfile);
+router.put('/profile/update', authenticate, uploadProfileImage.single('profileImage'), updateProfile);
 
 module.exports = router;

@@ -111,16 +111,16 @@ router.get('/profile/:vendor_id', async (req, res) => {
     // Type-specific vendor details for phone/name/profile image
     const [proposalVendor, albumVendor, serviceVendor, productVendor] = await Promise.all([
       db.collection('proposal_vendors').findOne({
-        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }, { _id: vendorObjectId }]
       }),
       db.collection('album_vendors').findOne({
-        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }, { _id: vendorObjectId }]
       }),
       db.collection('service_vendors').findOne({
-        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }, { _id: vendorObjectId }]
       }),
       db.collection('product_vendors').findOne({
-        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+        $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }, { _id: vendorObjectId }]
       })
     ]);
 
@@ -139,6 +139,7 @@ router.get('/profile/:vendor_id', async (req, res) => {
       business_name: legacyProfile?.business_name || '',
       business_type: legacyProfile?.vendor_type_id || '',
       description: legacyProfile?.description || '',
+      profilePic: typedImage || '',
       profile_image: typedImage || legacyProfile?.profile_image || '',
       social_links: legacyProfile?.social_links || {},
       created_at: legacyProfile?.created_at || vendorAccount?.createdAt || null
@@ -234,11 +235,23 @@ router.put('/profile/:vendor_id', uploadProfileImage.single('profile_image'), as
     }
 
     const typeFilter = {
-      $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }]
+      $or: [{ vendor_id: vendorObjectId }, { vendor_id: vendor_id }, { _id: vendorObjectId }]
     };
 
+    // Proposal admin profile relies on proposal_vendors; ensure a doc exists and is updated.
+    await db.collection('proposal_vendors').updateOne(
+      typeFilter,
+      {
+        $set: typeBaseUpdate,
+        $setOnInsert: {
+          vendor_id: vendorObjectId,
+          createdAt: new Date()
+        }
+      },
+      { upsert: true }
+    );
+
     await Promise.all([
-      db.collection('proposal_vendors').updateMany(typeFilter, { $set: typeBaseUpdate }),
       db.collection('album_vendors').updateMany(typeFilter, { $set: typeBaseUpdate }),
       db.collection('service_vendors').updateMany(typeFilter, { $set: typeBaseUpdate }),
       db.collection('product_vendors').updateMany(typeFilter, { $set: typeBaseUpdate })

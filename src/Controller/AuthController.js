@@ -233,22 +233,10 @@ const login = async (req, res, next) => {
         normalizedVendorTypes: normalizeVendorTypes(photographer.vendorTypes),
       });
       const token = generateToken(photographer._id.toString(), 'vendor');
-      
-      // Separate access states for each account
-      const accountsWithAccess = vendorAccounts.map(acc => {
-        const accAccess = resolveSubscriptionAccessState(
-          acc.vendorType === 'proposal' && proposalDoc ? proposalDoc : photographer,
-          acc.vendorType
-        );
-        return {
-          ...acc,
-          accessState: accAccess.state,
-          nextRoute: accAccess.nextRoute
-        };
-      });
-
-      // Default access for the overall login response (prioritize active/pending over no_plan)
-      const primaryAccount = accountsWithAccess.find(a => a.accessState === 'active') || accountsWithAccess[0];
+      const access = proposalDoc?.paymentStatus === 'active'
+        ? resolveSubscriptionAccessState(proposalDoc, 'proposal')
+        : resolveSubscriptionAccessState(photographer, 'album');
+      const loginProfileImage = photographer.profileImage || photographer.profilePic || proposalDoc?.profileImage || proposalDoc?.profilePic || '';
 
       // Update last login
       photographer.lastLogin = new Date();
@@ -262,13 +250,15 @@ const login = async (req, res, next) => {
         vendorTypes: photographer.vendorTypes,
         status: photographer.status,
         businessName: photographer.businessName,
+        profileImage: loginProfileImage,
+        profilePic: loginProfileImage,
         subPlan: photographer.subPlan || null,
         paymentStatus: photographer.paymentStatus || null,
         subscriptionStartDate: photographer.subscriptionStartDate || null,
         subscriptionEndDate: photographer.subscriptionEndDate || null,
-        vendorAccounts: accountsWithAccess,
-        accessState: primaryAccount.accessState,
-        nextRoute: primaryAccount.nextRoute,
+        vendorAccounts,
+        accessState: access.state,
+        nextRoute: access.nextRoute,
         token,
       });
     }
@@ -317,47 +307,87 @@ const getProfile = async (req, res, next) => {
 };
 
 /**
- * Update vendor profile
- * 
+ * Update current vendor profile
+ *
  * @route PUT /api/auth/profile/update
  * @header Authorization: Bearer <token>
  */
 const updateProfile = async (req, res, next) => {
   try {
-    if (!req.user) {
+    if (!req.user?.id) {
       return res.status(401).json({
         success: false,
         error: 'Not authenticated',
       });
     }
 
-    const { username, businessName, whatsappNo, contactNo, address, bio } = req.body;
+    const updateData = { updatedAt: new Date() };
+    const {
+      username,
+      businessName,
+      whatsappNo,
+      contactNo,
+      address,
+      bio,
+    } = req.body || {};
 
-    const photographer = await Photographer.findById(req.user.id);
-    if (!photographer) {
+    if (username !== undefined) updateData.username = username;
+    if (businessName !== undefined) updateData.businessName = businessName;
+    if (whatsappNo !== undefined) updateData.whatsappNo = whatsappNo;
+    if (contactNo !== undefined) updateData.contactNo = contactNo;
+    if (address !== undefined) updateData.address = address;
+    if (bio !== undefined) updateData.bio = bio;
+
+    if (req.file) {
+      const imagePath = `/uploads/profiles/${req.file.filename}`;
+      updateData.profileImage = imagePath;
+      // Keep legacy field updated for screens that still read profilePic.
+      updateData.profilePic = imagePath;
+    }
+
+    const updatedPhotographer = await Photographer.findByIdAndUpdate(
+      req.user.id,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedPhotographer) {
       return res.status(404).json({
         success: false,
         error: 'Photographer not found',
       });
     }
 
-    // Update fields
-    if (username) photographer.username = username;
-    if (businessName !== undefined) photographer.businessName = businessName;
-    if (whatsappNo !== undefined) photographer.whatsappNo = whatsappNo;
-    if (contactNo !== undefined) photographer.contactNo = contactNo;
-    if (address !== undefined) photographer.address = address;
-    if (bio !== undefined) photographer.bio = bio;
+    // Keep proposal account profile details in sync when the same vendor has a proposal profile.
+    const proposalUpdateData = { updatedAt: new Date() };
+    if (username !== undefined) {
+      proposalUpdateData.username = username;
+      proposalUpdateData.name = username;
+    }
+    if (businessName !== undefined && businessName) {
+      proposalUpdateData.name = businessName;
+    }
+    if (whatsappNo !== undefined) proposalUpdateData.whatsappNo = whatsappNo;
+    if (address !== undefined) proposalUpdateData.address = address;
+    if (bio !== undefined) proposalUpdateData.description = bio;
+    if (req.file) {
+      proposalUpdateData.profileImage = `/uploads/profiles/${req.file.filename}`;
+      proposalUpdateData.profilePic = `/uploads/profiles/${req.file.filename}`;
+    }
 
-    await photographer.save();
+    await Proposal.findOneAndUpdate(
+      { email: updatedPhotographer.email?.toLowerCase() },
+      { $set: proposalUpdateData },
+      { new: true }
+    );
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
+      data: updatedPhotographer,
       message: 'Profile updated successfully',
-      data: photographer,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 

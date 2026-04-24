@@ -44,6 +44,27 @@ const proposalSchema = new mongoose.Schema(
       enum: ['album', 'photographer', 'proposal', 'services', 'product'],
       default: [],
     },
+    vendorSubscriptions: {
+      type: [
+        {
+          vendorType: {
+            type: String,
+            enum: ['album', 'proposal', 'services', 'product'],
+          },
+          subPlan: { type: String, trim: true },
+          paymentMethod: { type: String, enum: ['payment-slip', 'payhere', null], default: null },
+          paymentSlip: { type: String, trim: true },
+          paymentStatus: { type: String, enum: ['pending', 'paid', 'active', 'rejected', null], default: null },
+          paymentAmount: { type: Number, default: 0, min: 0 },
+          paymentId: { type: String, trim: true },
+          transactionId: { type: String, trim: true },
+          paidAt: { type: Date, default: null },
+          subscriptionStartDate: { type: Date, default: null },
+          subscriptionEndDate: { type: Date, default: null },
+        },
+      ],
+      default: [],
+    },
     subPlan: {
       type: String,
       trim: true,
@@ -93,6 +114,9 @@ const proposalSchema = new mongoose.Schema(
       default: 'pending',
     },
     profileImage: {
+      type: String,
+    },
+    profilePic: {
       type: String,
     },
     description: {
